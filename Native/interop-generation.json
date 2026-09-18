@@ -1,0 +1,11 @@
+{
+  "library": "Native/linux-arm64/libDemo.so",
+  "headers": [
+    "Native/linux-arm64/include/demo_api.h",
+    "Native/linux-arm64/include/demo_data.h"
+  ],
+  "namespace": "TrackedVehicle.SDK.Generated",
+  "output": "SDK/Generated/LibDemoNative.g.cs",
+  "callingConvention": "Cdecl",
+  "notes": "Generated files may be replaced as a unit. Keep Core and SDK adapter code independent from the generated declarations."
+}

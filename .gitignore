@@ -23,6 +23,12 @@ bld/
 [Ll]og/
 [Ll]ogs/
 
+# SQLite runtime data
+[Dd]ata/*.db
+[Dd]ata/*.db-journal
+[Dd]ata/*.db-shm
+[Dd]ata/*.db-wal
+
 # .NET Core
 project.lock.json
 project.fragment.lock.json

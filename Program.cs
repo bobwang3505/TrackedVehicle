@@ -1,24 +1,38 @@
 
 namespace TrackedVehicle
 {
+    using Core;
+    using Core.Impl;
+    using Extensions;
+
     public class Program
     {
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // Add services to the container.
+            builder.AddFileLogging();
+            builder.Services.AddSqlSugarSqlite(builder.Configuration, builder.Environment);
+            builder.Services.AddNativeSdk(builder.Configuration);
 
             builder.Services.AddControllers();
-            // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-            builder.Services.AddOpenApi();
+            builder.Services.AddHostedService<TrackedVehicleBackgroundService>();
+            builder.Services.AddScoped<IInspectionService, InspectionService>();
+            builder.Services.AddEndpointsApiExplorer();
+            builder.Services.AddSwaggerGen(options =>
+            {
+                var xmlFile = $"{typeof(Program).Assembly.GetName().Name}.xml";
+                options.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, xmlFile));
+            });
 
             var app = builder.Build();
 
-            // Configure the HTTP request pipeline.
+            app.InitializeDatabase();
+
             if (app.Environment.IsDevelopment())
             {
-                app.MapOpenApi();
+                app.UseSwagger();
+                app.UseSwaggerUI();
             }
 
             app.UseHttpsRedirection();
