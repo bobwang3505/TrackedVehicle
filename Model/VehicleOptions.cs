@@ -5,6 +5,7 @@ public sealed class VehicleOptions
 {
     public const string SectionName = "Vehicle";
     public string RecordSavePath { get; set; } = string.Empty;
+    public PLCOptions PLC { get; set; } = new();
     public List<CameraOptions> Cameras { get; set; } = [];
 }
 

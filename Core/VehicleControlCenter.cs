@@ -34,16 +34,18 @@ public sealed class VehicleControlCenter
             throw new InvalidOperationException("控制中心已在运行，不能重复启动。");
         }
 
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var plcTask = PLC.RunAsync(lifetime.Token);
         try
         {
-            _logger.LogInformation("控制中心启动，共 {CameraCount} 个相机管理实例；PLC 等待后续接入", Cameras.Count);
+            _logger.LogInformation("控制中心启动，共 {CameraCount} 个相机管理实例，PLC 通信循环已调度", Cameras.Count);
             foreach (var camera in Cameras)
             {
                 await camera.OpenAsync(stoppingToken);
             }
 
             // 真实 SDK 接入后在此调度连接状态检查和失败重试，不重复打开正常工作的相机。
-            await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+            await plcTask;
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -51,6 +53,16 @@ public sealed class VehicleControlCenter
         }
         finally
         {
+            lifetime.Cancel();
+            try
+            {
+                await plcTask;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "PLC 通信任务退出异常");
+            }
+
             foreach (var camera in Cameras.Reverse())
             {
                 try

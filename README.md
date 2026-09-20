@@ -9,10 +9,20 @@
 - `CameraManagerFactory` 为每个启用的相机创建独立对象，控制中心持有这些对象；不是多个相机共用一个单例相机对象。
 - `CameraManager.OpenAsync` / `CloseAsync` 当前仅为接入位置，会明确记录尚未接入真实 SDK。录像将在真实开相机回调流程中接入；目前不录像、不识别、不调用 Demo 库。
 - `Enabled` 控制是否创建相机实例，`DetectionEnabled` 和 `Record.Enabled` 为后续识别、录像预留开关，目前识别默认关闭。
-- `PLCManager` 注册为单例，目前只有空类，等待协议确定后实现。
+- `PLCManager` 注册为单例，控制中心启动时自动运行 TCP 连接、接收和断线重连循环；连接失败不会阻止相机管理流程启动。
 - 停止后台服务时控制中心依次调用各相机的关闭方法。相机 Id 重复、端口或录像数字参数无效时启动校验失败。
 
 配置里的相机 IP 和账号仍为示例，接入真实 SDK 前需要补全。旧的原生 SDK 测试 Controller 已移除，相机启停由控制中心调度；底层 SDK 声明和适配器保留供后续接入参考。
+
+## PLC TCP 通信
+
+`Vehicle:PLC` 配置地址和端口，当前为 Demo 中的 `192.168.7.45:8080`。启动项目即尝试连接；`ConnectTimeoutSeconds` 默认 5 秒，连接失败或断开后每隔 `ReconnectIntervalSeconds`（默认 5 秒）重试。暂时不需要 PLC 时，将 `Enabled` 设为 `false`。
+
+连接与接收任务由控制中心持有并在停止时取消、等待退出；不另外创建无人等待的接收任务。日志会显示连接状态及收到的十六进制字节。当前没有应用层心跳，突然断网不一定立即被发现。
+
+业务层通过注入的单例 `PLCManager` 调用 `await plcManager.SendDataAsync(commandBytes, cancellationToken)` 发送原始字节，不使用 `new PLCManager()` 或手动 Dispose。并发发送会串行写入，未连接时抛异常，发送失败不自动重发，避免重复执行设备指令。写入完成仅表示数据交给 TCP，不表示 PLC 已执行成功。
+
+启动时不会自动发送 `HelloWorld`。当前只实现 TCP 传输，尚未实现 PLC 业务报文、应答匹配或控制指令；TCP 一次读取可能是半包或多个报文，不能直接视为一条完整消息。后续按协议增加缓存拆包和业务处理。
 
 ## 雪花 ID
 

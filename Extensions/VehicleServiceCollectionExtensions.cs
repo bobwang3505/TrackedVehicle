@@ -18,6 +18,11 @@ public static class VehicleServiceCollectionExtensions
             .Validate(options => options.Cameras is not null && options.Cameras.All(camera => camera is not null)
                 && options.Cameras.Select(camera => camera.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == options.Cameras.Count,
                 "相机 Id 不能重复。")
+            .Validate(options => options.PLC is not null && (!options.PLC.Enabled ||
+                (!string.IsNullOrWhiteSpace(options.PLC.IP) && options.PLC.Port is > 0 and <= 65535
+                && options.PLC.ConnectTimeoutSeconds is > 0 and <= 3600
+                && options.PLC.ReconnectIntervalSeconds is > 0 and <= 3600)),
+                "启用 PLC 时必须配置地址、有效端口以及 1-3600 秒的连接超时和重连间隔。")
             .ValidateOnStart();
 
         services.AddSingleton<CameraManagerFactory>();
