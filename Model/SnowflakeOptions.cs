@@ -5,7 +5,7 @@ namespace TrackedVehicle.Model;
 /// </summary>
 public sealed class SnowflakeOptions
 {
-    /// <summary>当前设备编号，多设备部署时必须唯一，范围 0-31。</summary>
+    /// <summary>设备编号，范围 0-31；同一数据中心内不能重复，同一节点只能运行一个实例。</summary>
     public long WorkerId { get; set; }
 
     /// <summary>数据中心编号，范围 0-31。</summary>
