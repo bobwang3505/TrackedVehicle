@@ -1,6 +1,19 @@
 # TrackedVehicle
 巡检小车
 
+## 控制中心与相机管理
+
+启动时由 `TrackedVehicleBackgroundService` 调用单例 `VehicleControlCenter`，读取 `Vehicle` 配置（原示例 `AAA` 节点）。配置修改后需要重启程序。
+
+- `VehicleOptions` 映射保存路径和相机数组，端口、FPS、切片秒数使用数字。
+- `CameraManagerFactory` 为每个启用的相机创建独立对象，控制中心持有这些对象；不是多个相机共用一个单例相机对象。
+- `CameraManager.OpenAsync` / `CloseAsync` 当前仅为接入位置，会明确记录尚未接入真实 SDK。录像将在真实开相机回调流程中接入；目前不录像、不识别、不调用 Demo 库。
+- `Enabled` 控制是否创建相机实例，`DetectionEnabled` 和 `Record.Enabled` 为后续识别、录像预留开关，目前识别默认关闭。
+- `PLCManager` 注册为单例，目前只有空类，等待协议确定后实现。
+- 停止后台服务时控制中心依次调用各相机的关闭方法。相机 Id 重复、端口或录像数字参数无效时启动校验失败。
+
+配置里的相机 IP 和账号仍为示例，接入真实 SDK 前需要补全。旧的原生 SDK 测试 Controller 已移除，相机启停由控制中心调度；底层 SDK 声明和适配器保留供后续接入参考。
+
 ## 雪花 ID
 
 数据库主键及逻辑关联字段保持 `long`。新 ID 使用秒级时间差、5 位数据中心、5 位设备编号和 10 位序号：

@@ -14,9 +14,9 @@ namespace TrackedVehicle
             builder.AddFileLogging();
             builder.Services.AddSqlSugarSqlite(builder.Configuration, builder.Environment);
             builder.Services.AddNativeSdk(builder.Configuration);
+            builder.Services.AddVehicleControl(builder.Configuration);
 
             builder.Services.AddControllers();
-            builder.Services.AddHostedService<TrackedVehicleBackgroundService>();
             builder.Services.AddScoped<IInspectionService, InspectionService>();
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(options =>
