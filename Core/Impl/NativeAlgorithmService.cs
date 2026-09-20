@@ -2,7 +2,6 @@ using System.Runtime.InteropServices;
 using Microsoft.Extensions.Options;
 using TrackedVehicle.Model;
 using TrackedVehicle.SDK;
-using TrackedVehicle.SDK.Generated;
 
 namespace TrackedVehicle.Core.Impl;
 

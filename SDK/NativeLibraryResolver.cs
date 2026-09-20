@@ -1,6 +1,5 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
-using TrackedVehicle.SDK.Generated;
 
 namespace TrackedVehicle.SDK;
 
