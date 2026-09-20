@@ -27,7 +27,7 @@ internal static class NativeLibraryResolver
         Assembly assembly,
         DllImportSearchPath? searchPath)
     {
-        if (libraryName != LibDemoNative.LogicalLibraryName)
+        if (libraryName != RobotCamXNative.LogicalLibraryName)
         {
             return IntPtr.Zero;
         }

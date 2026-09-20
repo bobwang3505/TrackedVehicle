@@ -9,7 +9,7 @@ public sealed class NativeSdkOptions
     public bool Enabled { get; set; } = true;
 
     /// <summary>发布目录中的动态库文件名。</summary>
-    public string LibraryName { get; set; } = "libDemo.so";
+    public string LibraryName { get; set; } = "LibRobotCamX.so";
 
     /// <summary>默认摄像头设备或地址。</summary>
     public string DefaultDevice { get; set; } = "/dev/video0";

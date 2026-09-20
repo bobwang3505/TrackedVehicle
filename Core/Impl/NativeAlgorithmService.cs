@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Extensions.Options;
 using TrackedVehicle.Model;
 using TrackedVehicle.SDK;
@@ -15,10 +16,9 @@ public sealed class NativeAlgorithmService : INativeAlgorithmService
     private readonly string _libraryPath;
 
     // 原生代码可能在调用返回后继续持有回调地址，因此必须由长生命周期对象持有委托。
-    private readonly LibDemoNative.AvFrameIndexCallback _frameIndexCallback;
-    private readonly LibDemoNative.AvStreamCallback _streamCallback;
-    private readonly LibDemoNative.AvStatusCallback _statusCallback;
-    private readonly LibDemoNative.AvMediaFinishCallback _mediaFinishCallback;
+    private readonly RobotCamXNative.AvFrameIndexCallback _frameIndexCallback;
+    private readonly RobotCamXNative.AvStatusCallback _statusCallback;
+    private readonly RobotCamXNative.AvMediaFinishCallback _mediaFinishCallback;
 
     public NativeAlgorithmService(
         IOptions<NativeSdkOptions> options,
@@ -29,7 +29,6 @@ public sealed class NativeAlgorithmService : INativeAlgorithmService
         _libraryPath = Path.Combine(AppContext.BaseDirectory, _options.LibraryName);
 
         _frameIndexCallback = OnFrameIndex;
-        _streamCallback = OnStream;
         _statusCallback = OnStatus;
         _mediaFinishCallback = OnMediaFinished;
 
@@ -47,21 +46,21 @@ public sealed class NativeAlgorithmService : INativeAlgorithmService
             File.Exists(_libraryPath));
     }
 
-    public OpenCameraResult OpenCamera(string? device, string? alias, int parentCameraId)
+    public OpenCameraResult OpenCamera(string? device, string? alias)
     {
         EnsureAvailable();
 
-        var config = new LibDemoNative.CameraConfig
+        var config = new RobotCamXNative.CameraConfig
         {
             Device = string.IsNullOrWhiteSpace(device) ? _options.DefaultDevice : device,
-            Alias = string.IsNullOrWhiteSpace(alias) ? _options.DefaultAlias : alias,
-            ParentCameraId = parentCameraId
+            Alias = string.IsNullOrWhiteSpace(alias) ? _options.DefaultAlias : alias
         };
+        ValidateFixedString(config.Device, nameof(device));
+        ValidateFixedString(config.Alias, nameof(alias));
         var cameraId = -1;
-        var resultCode = LibDemoNative.OpenCamera(
+        var resultCode = RobotCamXNative.OpenCamera(
             ref config,
             _frameIndexCallback,
-            _streamCallback,
             _statusCallback,
             ref cameraId);
 
@@ -76,7 +75,7 @@ public sealed class NativeAlgorithmService : INativeAlgorithmService
     public int CloseCamera(int cameraId)
     {
         EnsureAvailable();
-        var resultCode = LibDemoNative.CloseCamera(cameraId);
+        var resultCode = RobotCamXNative.CloseCamera(cameraId);
         _logger.LogInformation(
             "原生 SDK 关闭摄像头完成，ResultCode={ResultCode}, CameraId={CameraId}",
             resultCode,
@@ -91,9 +90,10 @@ public sealed class NativeAlgorithmService : INativeAlgorithmService
     {
         EnsureAvailable();
 
-        var mediaInfo = new LibDemoNative.MediaInfo { Path = filePath };
+        ValidateFixedString(filePath, nameof(filePath));
+        var mediaInfo = new RobotCamXNative.MediaInfo { Path = filePath };
         var recordingId = -1;
-        var resultCode = LibDemoNative.StartRealTimeRecord(
+        var resultCode = RobotCamXNative.StartRealTimeRecord(
             cameraId,
             ref mediaInfo,
             durationSeconds,
@@ -111,7 +111,7 @@ public sealed class NativeAlgorithmService : INativeAlgorithmService
     public int StopRecording(int recordingId)
     {
         EnsureAvailable();
-        var resultCode = LibDemoNative.StopRealTimeRecord(recordingId);
+        var resultCode = RobotCamXNative.StopRealTimeRecord(recordingId);
         _logger.LogInformation(
             "原生 SDK 停止录像完成，ResultCode={ResultCode}, RecordingId={RecordingId}",
             resultCode,
@@ -123,18 +123,18 @@ public sealed class NativeAlgorithmService : INativeAlgorithmService
     {
         EnsureAvailable();
 
-        var roi = new LibDemoNative.RoiInfo
+        var roi = new RobotCamXNative.RoiInfo
         {
             X = region.X,
             Y = region.Y,
             Width = region.Width,
             Height = region.Height
         };
-        var nativeResult = new LibDemoNative.DetectionGroupInfo
+        var nativeResult = new RobotCamXNative.LaneDetectGroup
         {
-            Detections = new LibDemoNative.DetectionInfo[10]
+            Detections = new RobotCamXNative.LaneDetectInfo[RobotCamXNative.MaxDetectionCount]
         };
-        var resultCode = LibDemoNative.Detect(cameraId, in roi, ref nativeResult);
+        var resultCode = RobotCamXNative.LaneDetect(cameraId, in roi, ref nativeResult);
         var count = Math.Clamp(nativeResult.Count, 0, nativeResult.Detections.Length);
         var detections = nativeResult.Detections
             .Take(count)
@@ -147,6 +147,29 @@ public sealed class NativeAlgorithmService : INativeAlgorithmService
             .ToArray();
 
         return new NativeDetectionResult(resultCode, detections);
+    }
+
+    public int InitModel(string modelPath)
+    {
+        EnsureAvailable();
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelPath);
+        if (modelPath.Contains('\0')) { throw new ArgumentException("模型路径不能包含空字符。", nameof(modelPath)); }
+        return RobotCamXNative.InitModel(modelPath);
+    }
+
+    public int ClearDetectResultInfo(int cameraId)
+    {
+        EnsureAvailable();
+        return RobotCamXNative.ClearDetectResultInfo(cameraId);
+    }
+
+    private static void ValidateFixedString(string value, string parameterName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, parameterName);
+        if (value.Contains('\0') || Encoding.UTF8.GetByteCount(value) > 199)
+        {
+            throw new ArgumentException("字符串不能包含空字符，且 UTF-8 编码最多 199 字节（保留末尾空字符）。", parameterName);
+        }
     }
 
     private void EnsureAvailable()
@@ -174,14 +197,6 @@ public sealed class NativeAlgorithmService : INativeAlgorithmService
 
     private void OnFrameIndex(int id, long frameIndex) =>
         _logger.LogDebug("原生帧回调：CameraId={CameraId}, FrameIndex={FrameIndex}", id, frameIndex);
-
-    private void OnStream(int id, IntPtr packet, long frameIndex, int type, int key) =>
-        _logger.LogDebug(
-            "原生码流回调：CameraId={CameraId}, FrameIndex={FrameIndex}, Type={Type}, Key={Key}",
-            id,
-            frameIndex,
-            type,
-            key);
 
     private void OnStatus(int id, int status) =>
         _logger.LogInformation("原生状态回调：CameraId={CameraId}, Status={Status}", id, status);

@@ -1,13 +1,14 @@
-// 人工维护的 P/Invoke 声明，对应 Native/linux-arm64/include/demo_api.h 和 demo_data.h。
+// 人工维护的 P/Invoke 声明，对应 Native/linux-arm64/include/RobotCamXApi.h 和 RobotCamXData.h。
 // 原生 ABI 变化时，手动同步函数签名、结构体布局和回调定义；维护步骤见 Native/README.md。
 
 using System.Runtime.InteropServices;
 
 namespace TrackedVehicle.SDK;
 
-internal static class LibDemoNative
+internal static class RobotCamXNative
 {
     internal const string LogicalLibraryName = "TrackedVehicle.NativeAlgorithm";
+    internal const int MaxDetectionCount = 10;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void AvStatusCallback(int id, int status);
@@ -16,6 +17,7 @@ internal static class LibDemoNative
     internal delegate void AvFrameIndexCallback(int id, long frameIndex);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    // 头文件定义了此回调类型，但当前没有导出函数接收它；暂不注册，也不访问 AVPacket 内容。
     internal delegate void AvStreamCallback(
         int id,
         IntPtr packet,
@@ -30,6 +32,7 @@ internal static class LibDemoNative
         long startTime,
         long endTime);
 
+    // Linux 上 CharSet.Ansi 按 UTF-8 封送；200 字节内包含结尾空字符。
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
     internal struct CameraConfig
     {
@@ -38,8 +41,6 @@ internal static class LibDemoNative
 
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 200)]
         internal string Alias;
-
-        internal int ParentCameraId;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
@@ -59,7 +60,7 @@ internal static class LibDemoNative
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct DetectionInfo
+    internal struct LaneDetectInfo
     {
         internal int BoxX;
         internal int BoxY;
@@ -69,35 +70,37 @@ internal static class LibDemoNative
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct DetectionGroupInfo
+    internal struct LaneDetectGroup
     {
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)]
-        internal DetectionInfo[] Detections;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = MaxDetectionCount)]
+        internal LaneDetectInfo[] Detections;
 
         internal int Count;
     }
 
     [DllImport(
         LogicalLibraryName,
-        EntryPoint = "Demo_OpenCam",
+        EntryPoint = "RobotX_OpenCam",
+        ExactSpelling = true,
         CallingConvention = CallingConvention.Cdecl,
         CharSet = CharSet.Ansi)]
     internal static extern int OpenCamera(
         ref CameraConfig config,
         AvFrameIndexCallback frameIndexCallback,
-        AvStreamCallback streamCallback,
         AvStatusCallback statusCallback,
         ref int cameraId);
 
     [DllImport(
         LogicalLibraryName,
-        EntryPoint = "Demo_CloseCam",
+        EntryPoint = "RobotX_CloseCam",
+        ExactSpelling = true,
         CallingConvention = CallingConvention.Cdecl)]
     internal static extern int CloseCamera(int cameraId);
 
     [DllImport(
         LogicalLibraryName,
-        EntryPoint = "Demo_StartRealTimeRecord",
+        EntryPoint = "RobotX_StartRealTimeRecord",
+        ExactSpelling = true,
         CallingConvention = CallingConvention.Cdecl,
         CharSet = CharSet.Ansi)]
     internal static extern int StartRealTimeRecord(
@@ -109,16 +112,26 @@ internal static class LibDemoNative
 
     [DllImport(
         LogicalLibraryName,
-        EntryPoint = "Demo_StopRealTimeRecord",
+        EntryPoint = "RobotX_StopRealTimeRecord",
+        ExactSpelling = true,
         CallingConvention = CallingConvention.Cdecl)]
     internal static extern int StopRealTimeRecord(int recordId);
 
     [DllImport(
         LogicalLibraryName,
-        EntryPoint = "Demo_Detect",
+        EntryPoint = "RobotX_LaneDetect",
+        ExactSpelling = true,
         CallingConvention = CallingConvention.Cdecl)]
-    internal static extern int Detect(
+    internal static extern int LaneDetect(
         int cameraId,
         in RoiInfo roi,
-        ref DetectionGroupInfo detectionGroup);
+        ref LaneDetectGroup detectionGroup);
+
+    [DllImport(LogicalLibraryName, EntryPoint = "RobotX_InitModel", ExactSpelling = true,
+        CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int InitModel([MarshalAs(UnmanagedType.LPUTF8Str)] string modelPath);
+
+    [DllImport(LogicalLibraryName, EntryPoint = "RobotX_ClearDetectResultInfo", ExactSpelling = true,
+        CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int ClearDetectResultInfo(int cameraId);
 }

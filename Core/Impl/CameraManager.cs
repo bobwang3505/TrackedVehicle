@@ -9,7 +9,7 @@ public sealed class CameraManager(
 {
     public string Id => options.Id;
 
-    /// <summary>打开相机的接入位置；当前仅记录待接入状态，不调用 Demo 动态库。</summary>
+    /// <summary>打开相机的接入位置；等待真实动态库到位后接入。</summary>
     public Task OpenAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

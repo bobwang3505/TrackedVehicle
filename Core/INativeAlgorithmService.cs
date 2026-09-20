@@ -11,7 +11,7 @@ public interface INativeAlgorithmService
     NativeSdkStatus GetStatus();
 
     /// <summary>打开摄像头。</summary>
-    OpenCameraResult OpenCamera(string? device, string? alias, int parentCameraId);
+    OpenCameraResult OpenCamera(string? device, string? alias);
 
     /// <summary>关闭摄像头，返回原生结果码。</summary>
     int CloseCamera(int cameraId);
@@ -25,6 +25,12 @@ public interface INativeAlgorithmService
     /// <summary>停止录像，返回原生结果码。</summary>
     int StopRecording(int recordingId);
 
-    /// <summary>调用算法检测指定区域。</summary>
+    /// <summary>初始化轨道检测模型，返回原生结果码。</summary>
+    int InitModel(string modelPath);
+
+    /// <summary>清除相机检测结果，返回原生结果码。</summary>
+    int ClearDetectResultInfo(int cameraId);
+
+    /// <summary>调用轨道检测算法检测指定区域。</summary>
     NativeDetectionResult Detect(int cameraId, DetectionRegion region);
 }
