@@ -13,7 +13,6 @@ namespace TrackedVehicle
 
             builder.AddFileLogging();
             builder.Services.AddSqlSugarSqlite(builder.Configuration, builder.Environment);
-            builder.Services.AddNativeSdk(builder.Configuration);
             builder.Services.AddVehicleControl(builder.Configuration);
 
             builder.Services.AddControllers();

@@ -1,31 +1,61 @@
-# Native SDK
+﻿# Native SDK
 
-`linux-arm64` 包含用于 RK3588 的 C++ 算法库及其头文件。
+按无人机项目的写法，结构体、回调委托和全部 7 个原生函数集中在 `NativeInterop/NativeMethods.cs`，命名与 `RobotCamXApi.h`、`RobotCamXData.h` 一致。业务直接调用 `NativeMethods.RobotX_*`，不需要注册服务或配置动态库解析器。
 
-`SDK/RobotCamXNative.cs` 是人工维护的 C# P/Invoke 声明，依据 `linux-arm64/include/RobotCamXApi.h` 和 `RobotCamXData.h` 编写。项目没有自动生成器，构建不会生成或更新此文件。
+## 调用方式
 
-## 当前接入状态
+下面是放在相机业务类中的调用示例，未接入启动流程。回调委托保存为实例字段，持有该实例直到原生端确认不再回调；回调内应捕获业务异常，不能让异常跨越原生边界。
 
-当前仅收到头文件，真实的 `LibRobotCamX.so` 尚未提供。`Native/linux-arm64/LibRobotCamX.so` 当前是 0 字节占位文件，不能加载或用于实际调用；收到真实库后直接覆盖此文件。库文件名区分大小写，现有项目规则会将其复制到输出及发布目录（占位文件也会被复制）。编译无需真实库，实际调用需要有效的 Linux ARM64 库及其依赖。
+```csharp
+private readonly AvFrameIndexFunc _frameCallback = OnFrameIndex;
+private readonly AvStatusFunc _statusCallback = OnStatus;
+private readonly AvMediaFinishFunc _finishCallback = OnMediaFinished;
+private int _camId = -1;
+private int _recId = -1;
 
-已声明全部 7 个导出函数：`RobotX_OpenCam`、`RobotX_CloseCam`、`RobotX_StartRealTimeRecord`、`RobotX_StopRealTimeRecord`、`RobotX_InitModel`、`RobotX_LaneDetect`、`RobotX_ClearDetectResultInfo`。
+public int OpenCamera(string address, string alias)
+{
+    var cfg = new CamCfg { chDev = address, chAlias = alias };
+    return NativeMethods.RobotX_OpenCam(ref cfg, _frameCallback, _statusCallback, ref _camId);
+}
 
-- 使用 Cdecl 调用约定。`int&` 映射为 `ref int`，`int64_t` 映射为 C# `long`。
-- 按头文件默认布局，CameraConfig 为 400 字节（已移除父相机编号）、MediaInfo 为 200 字节、RoiInfo 为 16 字节、LaneDetectInfo 为 20 字节、LaneDetectGroup 为 204 字节（10 个结果和计数）。实际二进制仍需确认未使用额外打包选项。
-- 字符串暂按 Linux UTF-8 约定处理，固定 `char[200]` 最多容纳 199 字节内容，适配器检查字节长度；编码需与 C++ 实现确认。
-- 新 OpenCam 仅接收帧序号和状态回调，没有码流回调参数。数据头文件虽然声明 AvStreamFunc，但尚无对应注册入口；不自行读取或释放 AVPacket。
-- 录像完成回调由 StartRealTimeRecord 注册，并非 OpenCam 参数。后续可在相机连接成功后发起录像，但需要确认状态回调、线程和停止契约后再接入管理流程。
-- 录像回调的时间单位和 id 含义、关闭后是否还有回调、模型初始化生命周期，均需由 SDK 实现方确认。暂不补造释放模型接口。
+// 相机连接成功后，由业务按录像开关调用。
+public int StartRecording(string path, int seconds)
+{
+    var media = new MediaInfo { chPath = path };
+    return NativeMethods.RobotX_StartRealTimeRecord(
+        _camId, ref media, seconds, _finishCallback, ref _recId);
+}
 
-旧 Demo 库及其头文件已移除。现有 NativeAlgorithmService 已同步签名，新增模型初始化及清除结果方法；CameraManager 仍保留待接入状态，不自动调用尚未提供的库。
+public int Detect(RoiInfo roi, out LaneDetectGroup result)
+{
+    result = new LaneDetectGroup { infos = new LaneDetectInfo[NativeMethods.MAX_COUNT] };
+    return NativeMethods.RobotX_LaneDetect(_camId, in roi, ref result);
+}
 
-## 更新 SDK
+private static void OnFrameIndex(int id, long frmIdx) { /* 处理帧序号 */ }
+private static void OnStatus(int id, int status) { /* 处理连接状态 */ }
+private static void OnMediaFinished(int id, string fileName, long startTime, long endTime)
+{
+    /* 处理已完成的录像文件 */
+}
+```
 
-1. 更新 `Native/linux-arm64` 下的 `.so` 和配套头文件。
-2. 对比新旧头文件，检查导出函数、结构体及回调定义是否变化。
-3. 若原生 ABI 变化，手动修改 `SDK/RobotCamXNative.cs`：核对导出名称、调用约定、参数类型与传递方式、结构体字段顺序与大小、固定数组长度、字符串封送及回调签名，确保与头文件一致。
-4. 将业务逻辑和兼容处理保留在 `Core/Impl/NativeAlgorithmService.cs`，并同步调整受接口变化影响的调用代码。
-5. 在项目目录执行 `dotnet build` 检查编译，再使用 `Properties/PublishProfiles/linux-arm64.pubxml` 发布到 `linux-arm64`。
-6. 将整个发布目录复制到开发板，在启动服务前执行 `ldd ./LibRobotCamX.so` 检查依赖，并在目标设备上验证相机、录像、检测和回调等实际调用。编译通过不能代替 ABI 和运行验证。
+模型初始化直接调用 `NativeMethods.RobotX_InitModel(modelPath)`；清除结果调用 `NativeMethods.RobotX_ClearDetectResultInfo(camId)`。停止已开始的录像调用 `NativeMethods.RobotX_StopRealTimeRecord(recId)`，再关闭已打开的相机 `NativeMethods.RobotX_CloseCam(camId)`。每次检查原生返回值后再执行后续操作；检测成功后只读取 `infos` 中前 `count` 项，并检查 count 在 0～10 范围内。
 
-若仅库文件名变化且 ABI 保持兼容，更新 `appsettings.json` 中的 `NativeSdk:LibraryName` 即可，无需修改 P/Invoke 声明。
+## 类型与生命周期
+
+- Linux ARM64 接口使用 Cdecl，包括回调；不照搬无人机示例里的 StdCall。`int&` 对应 `ref int`，`int64_t` 对应 C# `long`。
+- 默认结构体大小：CamCfg 400、MediaInfo 200、RoiInfo 16、LaneDetectInfo 20、LaneDetectGroup 204 字节。实际库需与头文件采用一致布局。
+- Linux 字符串按 UTF-8 封送。调用方应检查地址、别名、录像路径不含空字符，且 UTF-8 编码长度不超过 199 字节，避免固定数组截断；模型路径也不应包含空字符。
+- AvStreamFunc 只有类型定义，没有注册入口，不自行读取或释放 AVPacket。
+- 回调时间单位、线程、关闭后是否仍回调以及模型初始化生命周期，需与 SDK 实现方确认后接入相机管理。CameraManager 当前仍为待接入状态。
+
+## 部署与更新
+
+目前 `linux-arm64/LibRobotCamX.so` 为 0 字节占位文件，尚不能实际调用。收到真实 Linux ARM64 库后覆盖该文件；项目会将库复制到输出和发布目录。运行时由 .NET 按 DllImport 名称加载。
+
+1. 更新 `.so` 和配套头文件，若签名变化，直接修改 `NativeInterop/NativeMethods.cs` 和业务调用。
+2. 若库名变化，修改 `NativeMethods.DllName`；不再使用 `NativeSdk` 配置节点。
+3. 执行 `dotnet build`，通过 `Properties/PublishProfiles/linux-arm64.pubxml` 发布。
+4. 将发布目录复制到开发板，执行 `ldd ./LibRobotCamX.so` 检查依赖，再验证相机、录像、检测和回调。编译通过不代表原生调用验证通过。
