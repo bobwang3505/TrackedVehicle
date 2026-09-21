@@ -41,15 +41,18 @@ await camera.StopRecordingAsync(cancellationToken);
 
 ## 雪花 ID
 
-数据库主键及逻辑关联字段保持 `long`。新 ID 使用秒级时间差、5 位数据中心、5 位设备编号和 10 位序号：
+使用 [Yitter.IdGenerator](https://github.com/yitter/IdGenerator) 1.0.14 的雪花漂移算法（Method = 1）。参考 [ABP 的生成器接口设计](https://abp.io/docs/10.4/framework/infrastructure/guid-generation)，将 ID 生成作为独立的基础设施服务，集中放在 `Infrastructure/IdGeneration`：
 
-```text
-ID = (距 Epoch 的秒数 << 20) | (DataCenterId << 15) | (WorkerId << 10) | 序号
-```
+- `IIdGenerator`：提供 `long Create()`，供数据库或业务服务注入使用。
+- `SnowflakeIdGenerator`：内部实现，持有一个 Yitter `DefaultIdGenerator`。
+- `SnowflakeOptions`：雪花算法配置，与实现放在同一功能目录。
 
-- 使用配置中的 `2026-01-01T00:00:00Z` 起始时间，2026 年 9 月生成的 ID 为 14 位；位数随时间增长，不保证永久 14 位。
-- 生成器限制结果不超过 JavaScript 最大安全整数 `9007199254740991`，超出范围会报错，不会截断或取模。
-- 最多支持 32 个数据中心，每个中心 32 个节点；每节点每秒最多生成 1024 个 ID，超出时等待下一秒。
-- 为避免正常重启重用序号，生成器跳过启动所在秒，首次调用最多等待约 1 秒。每个节点只能运行一个进程，运行期间时钟回拨会报错；跨重启也应保证时钟不回拨。
-- 部署后不要随意修改 Epoch 或重复分配节点编号。
-- 本次仅改变新 ID 的生成方式，不重编号已有数据。旧的毫秒级长 ID 及其关联仍然保留，仍存在浏览器数字精度风险；新旧 ID 混用时不要按 ID 判断创建时间，应按 `CreateTime` 排序。
+启动时先调用 `AddSnowflakeIdGeneration(configuration)` 绑定配置并注册单例，再调用 `AddSqlSugarSqlite(...)`。SqlSugar 只依赖 `IIdGenerator` 接口，生成器也可独立于数据库使用。
+
+SqlSugar 插入对象时，在 `Id` 为 0（未赋值）时自动生成并回填主键。巡检记录和视频文件均适用，业务层继续使用 `Insertable(entity).ExecuteCommandAsync()`；已赋值的 ID 和更新操作不会重新生成 ID。数据库主键及逻辑关联字段保持 `long`。
+
+- `Snowflake:WorkerId`：范围 0-63，默认配置为 1。每个运行实例必须分配不同编号；原 `DataCenterId` 配置已移除，设备编号需全局唯一。
+- `Snowflake:Epoch`：映射到 Yitter 的 `BaseTime`，当前为 `2026-01-01T00:00:00Z`，部署后不要随意修改。
+- 固定使用 6 位设备编号和 6 位序号，时间戳为毫秒。ID 长度随时间增长，不保证固定 14 位，也不永久保证 JavaScript 安全整数范围；前端处理超过安全范围的历史或未来 ID 时应使用字符串传输方案。
+- 单例仅在本进程内保证共享生成器，不能让多个进程共用同一 WorkerId。重启时应确保系统时间超过上次生成 ID 的时间（含漂移），不要手动大幅回拨系统时钟。
+- 切换算法不修改已有数据及关联。新旧 ID 不适合用于推断创建先后，排序请使用 `CreateTime`。

@@ -1,8 +1,6 @@
 using Serilog;
 using SqlSugar;
-using TrackedVehicle.Core;
-using TrackedVehicle.Core.Impl;
-using TrackedVehicle.Model;
+using TrackedVehicle.Infrastructure.IdGeneration;
 
 namespace TrackedVehicle.Extensions;
 
@@ -12,16 +10,13 @@ namespace TrackedVehicle.Extensions;
 public static class SqlSugarServiceCollectionExtensions
 {
     /// <summary>
-    /// 注册 SQLite、SqlSugar 和雪花 ID 生成器。
+    /// 注册 SQLite 和 SqlSugar，主键由已注册的 IIdGenerator 生成。
     /// </summary>
     public static IServiceCollection AddSqlSugarSqlite(
         this IServiceCollection services,
         IConfiguration configuration,
         IWebHostEnvironment environment)
     {
-        services.Configure<SnowflakeOptions>(configuration.GetSection("Snowflake"));
-        services.AddSingleton<ISnowflakeIdGenerator, SnowflakeIdGenerator>();
-
         services.AddSingleton<ISqlSugarClient>(serviceProvider =>
         {
             var relativePath = configuration["Database:SQLitePath"]
@@ -29,7 +24,7 @@ public static class SqlSugarServiceCollectionExtensions
             var databasePath = Path.GetFullPath(relativePath, environment.ContentRootPath);
             Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
 
-            var idGenerator = serviceProvider.GetRequiredService<ISnowflakeIdGenerator>();
+            var idGenerator = serviceProvider.GetRequiredService<IIdGenerator>();
             var database = new SqlSugarScope(
                 new ConnectionConfig
                 {
@@ -47,7 +42,7 @@ public static class SqlSugarServiceCollectionExtensions
                             && entityInfo.PropertyName == "Id"
                             && Convert.ToInt64(oldValue ?? 0L) == 0L)
                         {
-                            entityInfo.SetValue(idGenerator.NextId());
+                            entityInfo.SetValue(idGenerator.Create());
                         }
                     };
 

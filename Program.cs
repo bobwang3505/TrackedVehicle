@@ -12,6 +12,7 @@ namespace TrackedVehicle
             var builder = WebApplication.CreateBuilder(args);
 
             builder.AddFileLogging();
+            builder.Services.AddSnowflakeIdGeneration(builder.Configuration);
             builder.Services.AddSqlSugarSqlite(builder.Configuration, builder.Environment);
             builder.Services.AddVehicleControl(builder.Configuration);
 
