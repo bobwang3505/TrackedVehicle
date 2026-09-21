@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Update="Native\linux-arm64\*.so">
+    <None Update="NativeInterop\linux-arm64\*.so">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <TargetPath>%(Filename)%(Extension)</TargetPath>

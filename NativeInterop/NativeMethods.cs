@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace TrackedVehicle
+namespace TrackedVehicle.NativeInterop
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void AvStatusFunc(int id, int status);

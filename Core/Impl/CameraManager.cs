@@ -1,5 +1,6 @@
 using System.Text;
 using TrackedVehicle.Model;
+using TrackedVehicle.NativeInterop;
 
 namespace TrackedVehicle.Core.Impl;
 

@@ -1,3 +1,5 @@
+using TrackedVehicle.NativeInterop;
+
 namespace TrackedVehicle.Core.Impl;
 
 /// <summary>管理 SDK 全局模型，并串行执行模型初始化、轨道检测及结果清理。</summary>

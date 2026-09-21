@@ -1,3 +1,5 @@
+using TrackedVehicle.NativeInterop;
+
 namespace TrackedVehicle.Core;
 
 /// <summary>模型和轨道检测管理；camId 是原生相机编号，调用期间应保持相机打开。</summary>
