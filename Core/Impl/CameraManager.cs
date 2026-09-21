@@ -9,6 +9,9 @@ public sealed class CameraManager : ICameraManager
 {
     private readonly CameraOptions _options;
     private readonly ILogger<CameraManager> _logger;
+    // 同一个相机共用这把锁：多个线程调用打开、关闭、录像等操作时，互斥执行锁内代码。
+    // readonly 保证锁对象不会被替换；每个 CameraManager 各有一把锁，不会锁住其他相机。
+    // 离开 lock 时自动释放锁（包括 return 或抛异常）；未使用这把锁的代码不受它保护。
     private readonly object _sync = new();
     // 关闭失败时仍保留委托，避免原生端调用已被 GC 回收的委托。
     private readonly AvFrameIndexFunc _frameCallback;
@@ -32,6 +35,7 @@ public sealed class CameraManager : ICameraManager
     {
         get
         {
+            // 读取句柄时也使用同一把锁；返回后锁已释放，不保证后续使用期间相机不会关闭。
             lock (_sync)
                 return _camId ?? throw new InvalidOperationException($"相机 {Id} 尚未打开。");
         }
@@ -39,6 +43,8 @@ public sealed class CameraManager : ICameraManager
 
     public Task<int> StartRecordingAsync(string path, CancellationToken cancellationToken)
     {
+        // 检查录像状态、调用 SDK、保存录像 ID 一起加锁，避免重复录像或与关闭操作冲突。
+        // NativeCameraId 内部也会加锁；同一线程可以再次进入同一把锁，不会把自己锁住。
         lock (_sync)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -77,6 +83,7 @@ public sealed class CameraManager : ICameraManager
 
     private void StopRecording()
     {
+        // 调用方 StopRecordingAsync / CloseAsync 已持有 _sync，这里复用它们的保护。
         if (_recordId is not int recordId)
             return;
 
@@ -91,6 +98,8 @@ public sealed class CameraManager : ICameraManager
     /// <summary>打开原生相机并注册回调；重复打开不重复创建相机。</summary>
     public Task OpenAsync(CancellationToken cancellationToken)
     {
+        // 把“检查是否打开 → 打开 SDK 相机 → 保存 ID”作为一个整体保护。
+        // 若 A、B 同时调用，先拿到锁的 A 打开后，B 才能进入，并因已有 ID 直接返回。
         lock (_sync)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -115,6 +124,7 @@ public sealed class CameraManager : ICameraManager
     /// <summary>关闭成功后清除原生 ID；未打开或已关闭时不调用 SDK。</summary>
     public Task CloseAsync(CancellationToken cancellationToken)
     {
+        // 停止录像和关闭相机共用同一把锁，防止中途另一个线程又开始录像。
         lock (_sync)
         {
             cancellationToken.ThrowIfCancellationRequested();
