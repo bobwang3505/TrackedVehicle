@@ -1,4 +1,4 @@
-﻿# Native SDK
+# Native SDK
 
 按无人机项目的写法，结构体、回调委托和全部 7 个原生函数集中在 `NativeInterop/NativeMethods.cs`，命名与 `RobotCamXApi.h`、`RobotCamXData.h` 一致。业务直接调用 `NativeMethods.RobotX_*`，不需要注册服务或配置动态库解析器。
 
