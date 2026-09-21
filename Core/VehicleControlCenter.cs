@@ -11,15 +11,18 @@ public sealed class VehicleControlCenter
 
     public IReadOnlyList<ICameraManager> Cameras { get; }
     public PLCManager PLC { get; }
+    public IDetectManager Detect { get; }
 
     public VehicleControlCenter(
         IOptions<VehicleOptions> options,
         CameraManagerFactory cameraFactory,
         PLCManager plcManager,
+        IDetectManager detectManager,
         ILogger<VehicleControlCenter> logger)
     {
         _logger = logger;
         PLC = plcManager;
+        Detect = detectManager;
         Cameras = options.Value.Cameras
             .Where(camera => camera.Enabled)
             .Select(cameraFactory.Create)
@@ -44,7 +47,7 @@ public sealed class VehicleControlCenter
                 await camera.OpenAsync(stoppingToken);
             }
 
-            // 真实 SDK 接入后在此调度连接状态检查和失败重试，不重复打开正常工作的相机。
+            // 相机由 SDK 回调报告连接状态；保持运行直到停止，不重复打开相机。
             await plcTask;
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

@@ -1,4 +1,5 @@
 using TrackedVehicle.Core;
+using TrackedVehicle.Core.Impl;
 using TrackedVehicle.Model;
 
 namespace TrackedVehicle.Extensions;
@@ -26,6 +27,7 @@ public static class VehicleServiceCollectionExtensions
             .ValidateOnStart();
 
         services.AddSingleton<CameraManagerFactory>();
+        services.AddSingleton<IDetectManager, DetectManager>();
         services.AddSingleton<PLCManager>();
         services.AddSingleton<VehicleControlCenter>();
         services.AddHostedService<TrackedVehicleBackgroundService>();

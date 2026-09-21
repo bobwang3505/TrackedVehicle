@@ -6,7 +6,16 @@ public interface ICameraManager
     /// <summary>配置中的相机业务编号，与原生 SDK 句柄不同。</summary>
     string Id { get; }
 
-    /// <summary>打开相机；真实 SDK 接入后注册相关回调。</summary>
+    /// <summary>已打开相机的原生 SDK 编号；未打开时抛异常。检测调用期间应保持相机打开。</summary>
+    int NativeCameraId { get; }
+
+    /// <summary>按配置的分段秒数开始录像，返回录像编号；已录像时返回现有编号。</summary>
+    Task<int> StartRecordingAsync(string path, CancellationToken cancellationToken);
+
+    /// <summary>停止当前录像；未录像时不调用 SDK。</summary>
+    Task StopRecordingAsync(CancellationToken cancellationToken);
+
+    /// <summary>调用原生 SDK 打开相机并注册帧序号、连接状态回调。</summary>
     Task OpenAsync(CancellationToken cancellationToken);
 
     /// <summary>关闭相机并清理相关资源。</summary>

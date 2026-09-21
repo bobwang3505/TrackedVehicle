@@ -4,7 +4,7 @@
 
 ## 调用方式
 
-下面是放在相机业务类中的调用示例，未接入启动流程。回调委托保存为实例字段，持有该实例直到原生端确认不再回调；回调内应捕获业务异常，不能让异常跨越原生边界。
+相机打开、关闭已通过 CameraManager 接入控制中心启动和停止流程；下面演示底层接口的调用方式，录像和检测尚未接入启动流程。回调委托保存为实例字段，持有该实例直到原生端确认不再回调；回调内应捕获业务异常，不能让异常跨越原生边界。
 
 ```csharp
 private readonly AvFrameIndexFunc _frameCallback = OnFrameIndex;
@@ -49,7 +49,7 @@ private static void OnMediaFinished(int id, string fileName, long startTime, lon
 - 默认结构体大小：CamCfg 400、MediaInfo 200、RoiInfo 16、LaneDetectInfo 20、LaneDetectGroup 204 字节。实际库需与头文件采用一致布局。
 - Linux 字符串按 UTF-8 封送。调用方应检查地址、别名、录像路径不含空字符，且 UTF-8 编码长度不超过 199 字节，避免固定数组截断；模型路径也不应包含空字符。
 - AvStreamFunc 只有类型定义，没有注册入口，不自行读取或释放 AVPacket。
-- 回调时间单位、线程、关闭后是否仍回调以及模型初始化生命周期，需与 SDK 实现方确认后接入相机管理。CameraManager 当前仍为待接入状态。
+- CameraManager 已注册帧序号和状态回调，委托保留在实例字段，关闭成功后也不立即释放委托。帧处理暂为空；录像、检测以及回调时间单位、模型初始化生命周期需在后续接入时确认。
 
 ## 部署与更新
 
