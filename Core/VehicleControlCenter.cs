@@ -42,12 +42,14 @@ public sealed class VehicleControlCenter
         try
         {
             _logger.LogInformation("控制中心启动，共 {CameraCount} 个相机管理实例，PLC 通信循环已调度", Cameras.Count);
+
+            // 相机由 SDK 回调报告连接状态；只需 OpenAsync 一次，无需轮询。
             foreach (var camera in Cameras)
             {
                 await camera.OpenAsync(stoppingToken);
             }
 
-            // 相机由 SDK 回调报告连接状态；保持运行直到停止，不重复打开相机。
+            // 等待 PLC 通信循环结束（收到取消信号后退出）。
             await plcTask;
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
