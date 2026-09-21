@@ -3,11 +3,15 @@ using TrackedVehicle.NativeInterop;
 namespace TrackedVehicle.Core.Impl;
 
 /// <summary>管理 SDK 全局模型，并串行执行模型初始化、轨道检测及结果清理。</summary>
+/// <remarks>内部同步调用 SDK；检测期间需保持相机打开。</remarks>
 public sealed class DetectManager(ILogger<DetectManager> logger) : IDetectManager
 {
+    // 所有相机共享这个检测管理实例的锁，避免模型初始化、检测和清理同时调用 SDK。
     private readonly object _sync = new();
+    // 只有本实例最近一次模型初始化成功后才允许检测。
     private bool _initialized;
 
+    /// <inheritdoc />
     public Task InitModelAsync(string modelPath, CancellationToken cancellationToken)
     {
         lock (_sync)
@@ -17,6 +21,7 @@ public sealed class DetectManager(ILogger<DetectManager> logger) : IDetectManage
             if (modelPath.Contains('\0'))
                 throw new ArgumentException("模型路径不能包含空字符。", nameof(modelPath));
 
+            // 重新初始化前先清除成功标记，若 SDK 失败，后续检测不能沿用旧的成功状态。
             _initialized = false;
             CheckResult(NativeMethods.RobotX_InitModel(modelPath), "初始化模型");
             _initialized = true;
@@ -25,6 +30,7 @@ public sealed class DetectManager(ILogger<DetectManager> logger) : IDetectManage
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
     public Task<LaneDetectGroup> LaneDetectAsync(int camId, RoiInfo roi, CancellationToken cancellationToken)
     {
         lock (_sync)
@@ -36,6 +42,7 @@ public sealed class DetectManager(ILogger<DetectManager> logger) : IDetectManage
             if (roi.nX < 0 || roi.nY < 0 || roi.nWidth <= 0 || roi.nHeight <= 0)
                 throw new ArgumentException("检测区域坐标不能为负数，宽高必须大于 0。", nameof(roi));
 
+            // 为原生结果结构体准备固定长度数组；SDK 写入结果后，只读取 count 指定的有效项。
             var group = new LaneDetectGroup { infos = new LaneDetectInfo[NativeMethods.MAX_COUNT] };
             CheckResult(NativeMethods.RobotX_LaneDetect(camId, in roi, ref group), "轨道检测");
             if (group.count < 0 || group.count > NativeMethods.MAX_COUNT)
@@ -44,6 +51,7 @@ public sealed class DetectManager(ILogger<DetectManager> logger) : IDetectManage
         }
     }
 
+    /// <inheritdoc />
     public Task ClearDetectResultAsync(int camId, CancellationToken cancellationToken)
     {
         lock (_sync)
@@ -55,6 +63,7 @@ public sealed class DetectManager(ILogger<DetectManager> logger) : IDetectManage
         return Task.CompletedTask;
     }
 
+    /// <summary>SDK 返回非 0 时抛出异常。</summary>
     private static void CheckResult(int result, string operation)
     {
         if (result != 0)

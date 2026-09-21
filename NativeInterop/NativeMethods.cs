@@ -86,15 +86,23 @@ namespace TrackedVehicle.NativeInterop
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int RobotX_StopRealTimeRecord(int recId);
 
-        /// <summary>初始化模型，0 成功，负数失败。</summary>
+        /// <summary>调用原生 SDK 初始化模型，轨道检测前需先成功调用。</summary>
+        /// <param name="modelPath">运行 SDK 的设备上的模型路径，以 UTF-8 字符串传给原生接口。</param>
+        /// <returns>0 成功，负数失败。</returns>
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int RobotX_InitModel([MarshalAs(UnmanagedType.LPUTF8Str)] string modelPath);
 
-        /// <summary>轨道检测，0 成功，负数失败。调用前将 infos 初始化为长度 MAX_COUNT 的数组。</summary>
+        /// <summary>对指定原生相机的指定区域执行轨道检测；调用前需初始化模型，并保持相机打开。</summary>
+        /// <param name="camId">打开相机后获得的原生相机编号，不是配置中的业务 Id。</param>
+        /// <param name="roi">检测区域的起点坐标和宽高。</param>
+        /// <param name="laneDetGrp">接收检测结果；调用前将 infos 初始化为长度 MAX_COUNT 的数组，成功后仅前 count 项有效。</param>
+        /// <returns>0 成功，负数失败。</returns>
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int RobotX_LaneDetect(int camId, in RoiInfo roi, ref LaneDetectGroup laneDetGrp);
 
-        /// <summary>清除检测结果，0 成功，负数失败。</summary>
+        /// <summary>清除指定原生相机的检测结果；与关闭相机是不同的 SDK 操作。</summary>
+        /// <param name="camId">需要清除检测结果的原生相机编号，不是配置中的业务 Id。</param>
+        /// <returns>0 成功，负数失败。</returns>
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int RobotX_ClearDetectResultInfo(int camId);
     }
