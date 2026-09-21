@@ -65,7 +65,7 @@ namespace TrackedVehicle
     /// <summary>C++ 摄像与算法接口，对应 RobotCamXApi.h 和 RobotCamXData.h。</summary>
     public class NativeMethods
     {
-        internal const string DllName = "LibRobotCamX.so";
+        internal const string DllName = @"LibRobotCamX.so";
         public const int MAX_COUNT = 10;
 
         /// <summary>打开相机，0 成功，负数失败。回调委托必须保存为字段直到原生端停止回调。</summary>
