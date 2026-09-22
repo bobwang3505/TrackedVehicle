@@ -167,9 +167,16 @@ public sealed class CameraManager : ICameraManager
             throw new InvalidOperationException($"{name}不能包含空字符，且 UTF-8 编码长度不能超过 199 字节。");
     }
 
+    /// <summary>
+    /// 开相机的回调
+    /// </summary>
+    /// <param name="id">相机id _camId</param>
+    /// <param name="frameIndex">帧序号（图像的编号）</param>
     private static void OnFrameIndex(int id, long frameIndex)
     {
+        //TODO 防止阻塞。不能直接这样调用
         // 帧处理由后续业务流程接入。
+        //NativeMethods.RobotX_LaneDetect(id, in roi, ref group);
     }
 
     private void OnMediaFinish(int id, string fileName, long startTime, long endTime)
