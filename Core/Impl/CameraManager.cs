@@ -15,15 +15,17 @@ public sealed class CameraManager : ICameraManager
     private readonly object _sync = new();
     // 关闭失败时仍保留委托，避免原生端调用已被 GC 回收的委托。
     private readonly AvFrameIndexFunc _frameCallback;
+    private readonly DetectionScheduler _detectionScheduler;
     private readonly AvStatusFunc _statusCallback;
     private readonly AvMediaFinishFunc _mediaFinishCallback;
     private int? _camId;
     private int? _recordId;
 
-    public CameraManager(CameraOptions options, ILogger<CameraManager> logger)
+    public CameraManager(CameraOptions options, ILogger<CameraManager> logger, DetectionScheduler detectionScheduler)
     {
         _options = options;
         _logger = logger;
+        _detectionScheduler = detectionScheduler;
         _frameCallback = OnFrameIndex;
         _statusCallback = OnStatus;
         _mediaFinishCallback = OnMediaFinish;
@@ -115,6 +117,10 @@ public sealed class CameraManager : ICameraManager
                 throw new InvalidOperationException($"打开相机 {Id} 失败，SDK 返回码：{result}。");
 
             _camId = camId;
+            if (_options.DetectionEnabled)
+            {
+                _detectionScheduler.Register(Id, camId, _options.Detection);
+            }
             _logger.LogInformation("相机 {CameraId}（{CameraName}）打开请求成功，原生 ID：{NativeCameraId}，连接结果由状态回调报告",
                 Id, _options.CameraName, camId);
         }
@@ -131,6 +137,8 @@ public sealed class CameraManager : ICameraManager
             if (_camId is not int camId)
                 return Task.CompletedTask;
 
+            if (_options.DetectionEnabled)
+                _detectionScheduler.Unregister(camId);
             StopRecording();
             var result = NativeMethods.RobotX_CloseCam(camId);
             if (result != 0)
@@ -172,11 +180,17 @@ public sealed class CameraManager : ICameraManager
     /// </summary>
     /// <param name="id">相机id _camId</param>
     /// <param name="frameIndex">帧序号（图像的编号）</param>
-    private static void OnFrameIndex(int id, long frameIndex)
+    private void OnFrameIndex(int id, long frameIndex)
     {
-        //TODO 防止阻塞。不能直接这样调用
-        // 帧处理由后续业务流程接入。
-        //NativeMethods.RobotX_LaneDetect(id, in roi, ref group);
+        try
+        {
+            if (_options.DetectionEnabled)
+                _detectionScheduler.TryNotify(id, frameIndex);
+        }
+        catch (Exception)
+        {
+            // 不获取相机锁、不调用 SDK；托管异常不能跨越原生回调边界。
+        }
     }
 
     private void OnMediaFinish(int id, string fileName, long startTime, long endTime)
