@@ -17,6 +17,18 @@ public sealed class InspectionVideoFile
     [SugarColumn(IsNullable = false)]
     public long InspectionRecordId { get; set; }
 
+    /// <summary>配置中的相机字符串业务 Id，不是 SDK 的整数 camId；旧记录未知时为空。</summary>
+    [SugarColumn(Length = 100, IsNullable = true)]
+    public string? CameraId { get; set; }
+
+    /// <summary>切片实际录像开始时间，不是入库时间；旧记录未知时为空。</summary>
+    [SugarColumn(IsNullable = true)]
+    public DateTime? StartTime { get; set; }
+
+    /// <summary>切片实际录像结束时间；旧记录未知时为空。</summary>
+    [SugarColumn(IsNullable = true)]
+    public DateTime? EndTime { get; set; }
+
     /// <summary>视频文件在板载本地磁盘中的路径。</summary>
     [SugarColumn(Length = 1024, IsNullable = false)]
     public string FilePath { get; set; } = string.Empty;

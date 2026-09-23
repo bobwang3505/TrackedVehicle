@@ -7,7 +7,7 @@ namespace TrackedVehicle.Core.Impl;
 /// <summary>
 /// 巡检记录业务服务实现。
 /// </summary>
-public sealed class InspectionService(ISqlSugarClient database) : IInspectionService
+public sealed class InspectionService(ISqlSugarClient database, VideoUploadQueue uploadQueue) : IInspectionService
 {
     public async Task<InspectionRecord> StartAsync(DateTime? startTime)
     {
@@ -33,6 +33,9 @@ public sealed class InspectionService(ISqlSugarClient database) : IInspectionSer
             return null;
         }
 
+        // 重复结束同一趟巡检时保留首次结束时间，避免重试把结束时间向后推。
+        if (record.EndTime.HasValue) return record;
+
         var finishTime = endTime ?? DateTime.Now;
         if (finishTime < record.StartTime)
         {
@@ -42,15 +45,24 @@ public sealed class InspectionService(ISqlSugarClient database) : IInspectionSer
         record.EndTime = finishTime;
         await database.Updateable(record)
             .UpdateColumns(item => new { item.EndTime })
+            .Where(item => item.Id == id && !item.IsDelete && item.EndTime == null)
             .ExecuteCommandAsync();
 
-        return record;
+        // 并发结束时以数据库中首先写入的结束时间为准。
+        return await database.Queryable<InspectionRecord>()
+            .Where(item => item.Id == id && !item.IsDelete).FirstAsync();
     }
 
     public async Task<InspectionVideoFile?> AddVideoFileAsync(
         long inspectionRecordId,
         CreateInspectionVideoFileRequest request)
     {
+        // 后台登记也会直接调用服务，因此不能只依赖 HTTP 请求参数校验。
+        if (string.IsNullOrWhiteSpace(request.CameraId) || request.CameraId.Length > 100)
+            throw new ArgumentException("必须提供相机业务 Id，长度不能超过 100。", nameof(request));
+        if (!request.StartTime.HasValue || !request.EndTime.HasValue || request.EndTime < request.StartTime)
+            throw new ArgumentException("必须提供切片录像起止时间，结束时间不能早于开始时间。", nameof(request));
+
         var inspectionExists = await database.Queryable<InspectionRecord>()
             .AnyAsync(item => item.Id == inspectionRecordId && !item.IsDelete);
 
@@ -62,6 +74,9 @@ public sealed class InspectionService(ISqlSugarClient database) : IInspectionSer
         var videoFile = new InspectionVideoFile
         {
             InspectionRecordId = inspectionRecordId,
+            CameraId = request.CameraId.Trim(),
+            StartTime = request.StartTime,
+            EndTime = request.EndTime,
             FilePath = request.FilePath.Trim(),
             IsUploaded = false,
             CreateTime = request.CreateTime ?? DateTime.Now,
@@ -69,6 +84,8 @@ public sealed class InspectionService(ISqlSugarClient database) : IInspectionSer
         };
 
         await database.Insertable(videoFile).ExecuteCommandAsync();
+        // 先持久化再通知上传；队列满或上传关闭时记录仍在库中，启用后的扫描会补入。
+        uploadQueue.TryEnqueue(videoFile.Id);
         return videoFile;
     }
 

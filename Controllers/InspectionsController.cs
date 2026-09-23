@@ -77,14 +77,22 @@ public sealed class InspectionsController(IInspectionService inspectionService) 
     /// <param name="request">本地视频切片文件信息。</param>
     [HttpPost("{id:long}/videos")]
     [ProducesResponseType(typeof(InspectionVideoFile), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<InspectionVideoFile>> AddVideoFile(
         long id,
         CreateInspectionVideoFileRequest request)
     {
-        var videoFile = await inspectionService.AddVideoFileAsync(id, request);
-        return videoFile is null
-            ? NotFound()
-            : StatusCode(StatusCodes.Status201Created, videoFile);
+        try
+        {
+            var videoFile = await inspectionService.AddVideoFileAsync(id, request);
+            return videoFile is null
+                ? NotFound()
+                : StatusCode(StatusCodes.Status201Created, videoFile);
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(exception.Message);
+        }
     }
 }

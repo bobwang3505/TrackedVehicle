@@ -14,6 +14,7 @@ namespace TrackedVehicle
             builder.AddFileLogging();
             builder.Services.AddSnowflakeIdGeneration(builder.Configuration);
             builder.Services.AddSqlSugarSqlite(builder.Configuration, builder.Environment);
+            builder.Services.AddVideoUpload(builder.Configuration);
             builder.Services.AddVehicleControl(builder.Configuration);
 
             builder.Services.AddControllers();

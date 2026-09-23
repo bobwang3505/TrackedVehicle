@@ -96,6 +96,46 @@ database.CodeFirst.InitTables<InspectionRecord, InspectionVideoFile>();
 
 当前 SQLite CodeFirst 配置用于新增表和字段，不会因实体删除属性就自动删除数据库中的旧列。例如之前已经建过 `IsRecordingCompleted` 列，删除实体属性后，数据库可能仍保留该列。字段删除、改名、修改类型或约束需单独处理数据库迁移，不能直接按新增字段的方式理解。表结构同步也不会自动完成业务数据转换或回填；本次设置默认值只表示已有文件默认为未上传。
 
+## 巡检记录与 RustFS 视频上传
+
+开始、结束和录像完成的业务触发时机暂未接入 PLC 或相机 SDK；以下入口已经可以调用：
+
+| 时机 | 调用入口 | 行为 |
+| --- | --- | --- |
+| 确认开始巡检 | `IInspectionService.StartAsync(startTime)` | 新建巡检记录，返回巡检 ID；调用方随后启动录像，并把 ID 与该次录像绑定 |
+| 确认结束巡检 | `IInspectionService.FinishAsync(inspectionId, endTime)` | 更新结束时间，重复调用保留首次结束时间；调用方负责停止对应录像 |
+| 已完成切片，处于普通异步业务流程 | `IInspectionService.AddVideoFileAsync(inspectionId, request)` | 等待文件入库，随后尝试加入上传队列 |
+| 已完成切片，处于原生回调 | `RecordingFileRegistrationService.TryNotifyCompleted(inspectionId, fullPath, cameraId, startTime, endTime)` | 只提交完成通知，后台串行存库后加入上传队列，不在回调中等待数据库或网络 |
+
+巡检结束时间按业务结束事件记录，不等待上传。停止录像产生的最后一个切片仍可登记到已结束的巡检中。`TryNotifyCompleted` 必须传该次录像所属的巡检 ID 和已经写完的文件完整路径，不能读取可能已经切换的“当前巡检 ID”。已约定巡检 ID 使用开始巡检时新建记录的 ID，回调文件名为完整路径；回调时间暂按 Unix 毫秒时间戳转换为本地 DateTime。当前 CameraManager.OnMediaFinish 已转换时间并记录日志，尚未绑定巡检 ID 或调用 TryNotifyCompleted；SDK 时间格式及最后一个切片的回调时序需在设备联调时核对。
+
+完成通知入口返回 `true` 只表示进入内存队列，不代表已存库。队列满、停止或参数无效时返回 `false`，未来接入回调时必须保留并补交通知。后台遇到存库异常每 5 秒重试当前通知；同一巡检、同一相机、同一路径的重复通知复用已有文件记录，每个切片必须使用唯一且不被覆盖的路径。正常停机先停止相机，再尽量排空完成通知，最后停止上传。异常断电可能丢失尚未入库的内存通知，这部分无法靠数据库扫描恢复，需依据本地文件和所属巡检补登记；已入库文件则可重启恢复上传。
+
+文件表新增 CameraId、StartTime、EndTime：分别保存配置中的相机字符串业务 Id 和切片实际录像起止时间。旧记录缺失的信息允许为空，不以入库时间补填；新登记请求必须提供这三项，结束时间不能早于开始时间。重新编译并启动后由 CodeFirst 添加字段。后续回放按巡检 ID 和 CameraId 筛选，再按 StartTime 排序；CreateTime 仍表示入库记录创建时间。SDK 回调时间暂用 DateTimeOffset.FromUnixTimeMilliseconds(value).LocalDateTime 转换，后续接入完成通知时传转换后的值；以部署设备的本地时区为准，联调发现时间格式不符时再调整。
+
+上传流程：
+
+1. 新切片先存库，再把文件 ID 加入有界上传队列。队列满时文件记录已在库中，由扫描补入。
+2. 启用上传后，启动时及每轮间隔后扫描未删除、未上传的记录，也兼容旧数据的 `IsUploaded` 为 `NULL` 或空字符串。扫描按 ID 分批读取，队列满时异步等待空位。
+3. 数据库扫描与新切片共用队列，按文件 ID 对排队中及上传中的任务去重；消费前再次检查记录状态。
+4. 固定数量的消费者上传文件到 RustFS。默认对象 key 为 `inspections/{巡检ID}/{文件ID}{扩展名}`；已有 `S3Key` 时复用。每个文件的分片串行上传，文件级并发由 `MaxConcurrency` 控制。
+5. 上传成功后用一条数据库 UPDATE 同时写入 `S3Key` 和 `IsUploaded = true`。上传或回写失败时不标记成功，后续扫描重试；同一记录重试使用相同 key。启用对象版本管理的 bucket 仍可能产生多个版本，不保证网络层只上传一次。本地文件不会自动删除。
+
+`VideoUpload` 配置修改后重启生效：
+
+| 配置 | 说明 |
+| --- | --- |
+| `Enabled` | 默认 `false`，关闭时仍可登记文件，但不扫描或上传 |
+| `ServiceUrl` | RustFS 的 S3 API 地址，例如 `http://服务器地址:9000`，不是管理控制台地址 |
+| `Region` | 默认 `us-east-1`，按服务端实际配置填写 |
+| `BucketName` | 已创建的目标 bucket，本程序不自动建 bucket |
+| `AccessKey` / `SecretKey` | 访问凭据；可通过环境变量 `VideoUpload__AccessKey` / `VideoUpload__SecretKey` 提供，勿将真实凭据提交到仓库 |
+| `MaxConcurrency` | 同时上传的文件数，默认 2，范围 1-32 |
+| `QueueCapacity` | 上传队列和完成通知队列各自的容量，默认 100 |
+| `ScanIntervalSeconds` | 一轮扫描完成后等待的秒数，默认 60；上传失败由后续扫描重试 |
+
+采用 AWS SDK 的 S3 客户端连接 RustFS，并启用 path-style 地址。参考 [RustFS 官方 SDK 接入说明](https://github.com/rustfs/docs.rustfs.com/blob/main/content/en/developer/sdk/javascript.md) 和 [AWS .NET TransferUtility 上传接口](https://docs.aws.amazon.com/sdkfornet/v4/apidocs/items/S3/MTransferUtilityUploadAsyncStringStringStringCancellationToken.html)。当前队列去重只覆盖单个程序实例，同一数据库应由一个实例负责上传；未进行 RustFS 和真实录像设备联调。
+
 ## 雪花 ID
 
 使用 [Yitter.IdGenerator](https://github.com/yitter/IdGenerator) 1.0.14 的雪花漂移算法（Method = 1）。参考 [ABP 的生成器接口设计](https://abp.io/docs/10.4/framework/infrastructure/guid-generation)，将 ID 生成作为独立的基础设施服务，集中放在 `Infrastructure/IdGeneration`：

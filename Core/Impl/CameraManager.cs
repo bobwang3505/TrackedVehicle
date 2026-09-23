@@ -198,8 +198,22 @@ public sealed class CameraManager : ICameraManager
         // 不获取生命周期锁；分段完成不代表整个录像会话结束。
         try
         {
+            // 暂按 Unix 毫秒时间戳解释：从 1970-01-01 UTC 起累计的毫秒数。
+            // 转为本地 DateTime，与当前 DateTime.Now 的存库时间口径一致；设备联调时核对。
+            var startedAt = DateTimeOffset.FromUnixTimeMilliseconds(startTime).LocalDateTime;
+            var endedAt = DateTimeOffset.FromUnixTimeMilliseconds(endTime).LocalDateTime;
             _logger.LogInformation("相机 {CameraId} 录像分段完成，原生 ID：{NativeId}，文件：{FileName}，开始：{StartTime}，结束：{EndTime}",
-                Id, id, fileName, startTime, endTime);
+                Id, id, fileName, startedAt, endedAt);
+        }
+        catch (ArgumentOutOfRangeException exception)
+        {
+            // 转换失败时保留原始值，便于联调确认 SDK 时间格式；日志异常也不能跨越原生边界。
+            try
+            {
+                _logger.LogError(exception, "相机 {CameraId} 录像时间无法按 Unix 毫秒转换，文件：{FileName}，原始开始：{StartTime}，原始结束：{EndTime}",
+                    Id, fileName, startTime, endTime);
+            }
+            catch (Exception) { }
         }
         catch (Exception)
         {
