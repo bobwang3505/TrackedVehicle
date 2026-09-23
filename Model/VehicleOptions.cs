@@ -25,10 +25,10 @@ public sealed class CameraOptions
     public CameraRecordOptions Record { get; set; } = new();
 }
 
-/// <summary>识别开始时间的最小间隔；实际吞吐量受模型耗时和相机数量限制。</summary>
+/// <summary>识别触发的帧间隔；实际吞吐量受模型耗时和相机数量限制。</summary>
 public sealed class CameraDetectionOptions
 {
-    public int IntervalMilliseconds { get; set; } = 200;
+    public int FrameInterval { get; set; } = 5;
     public DetectionRoiOptions ROI { get; set; } = new();
 }
 

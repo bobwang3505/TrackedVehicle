@@ -28,11 +28,11 @@ public static class VehicleServiceCollectionExtensions
                 camera is not null && (!camera.Enabled || !camera.DetectionEnabled ||
                 (!string.IsNullOrWhiteSpace(options.DetectionModelPath)
                 && !options.DetectionModelPath.Contains('\0')
-                && camera.Detection is not null && camera.Detection.IntervalMilliseconds > 0
+                && camera.Detection is not null && camera.Detection.FrameInterval > 0
                 && camera.Detection.ROI is not null && camera.Detection.ROI.X >= 0
                 && camera.Detection.ROI.Y >= 0 && camera.Detection.ROI.Width > 0
                 && camera.Detection.ROI.Height > 0))),
-                "启用识别时必须配置模型路径、正数识别间隔和有效 ROI（坐标非负、宽高大于零）。")
+                "启用识别时必须配置模型路径、大于等于 1 的识别帧间隔和有效 ROI（坐标非负、宽高大于零）。")
             .ValidateOnStart();
 
         services.AddSingleton<CameraManagerFactory>();

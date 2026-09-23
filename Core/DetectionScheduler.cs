@@ -33,35 +33,55 @@ public sealed class DetectionScheduler(IDetectManager detector, ILogger<Detectio
     private sealed class CameraState(string id, CameraDetectionOptions options)
     {
         public string Id { get; } = id;
-        public int IntervalMilliseconds { get; } = options.IntervalMilliseconds;
+        public int FrameInterval { get; } = options.FrameInterval;
         public RoiInfo Roi { get; } = new()
         {
             nX = options.ROI.X, nY = options.ROI.Y,
             nWidth = options.ROI.Width, nHeight = options.ROI.Height
         };
         public FrameNotice? Latest;
-        // 上一次开始识别的 Stopwatch 高精度时间戳（不是 Unix 时间戳）；null 表示还没有识别过。
-        public long? LastStartedTimestamp;
+        // 只保护回调中的帧号判断和通知提交，不在锁内识别，也不与相机生命周期锁共用。
+        public object NoticeSync { get; } = new();
+        public long? FirstFrameIndex;
+        public long? LastReceivedFrameIndex;
     }
 
     public void Register(string cameraId, int camId, CameraDetectionOptions options)
-        => cameraDitc[camId] = new CameraState(cameraId, options);
+    {
+        if (options.FrameInterval < 1)
+            throw new ArgumentOutOfRangeException(nameof(options), "识别帧间隔必须大于等于 1。");
+        cameraDitc[camId] = new CameraState(cameraId, options);
+    }
 
     /// <summary>
-    /// 由相机帧回调调用，只保存最新帧通知，不在回调中执行识别。
+    /// 由相机帧回调调用，只保存最新的符合帧间隔条件的通知，不在回调中执行识别。
     /// 新通知覆盖尚未处理的旧通知，避免识别速度跟不上相机帧率时积压。
     /// </summary>
     /// <param name="camId">C++ SDK 返回的相机 ID。</param>
-    /// <param name="frameIndex">本次回调的帧序号，仅用于记录触发信息。</param>
+    /// <param name="frameIndex">用于筛选触发通知的帧序号，不代表 SDK 实际识别的图像编号。</param>
     public void TryNotify(int camId, long frameIndex)
     {
         // 只有已登记的相机才接收通知；尚未登记或已注销的相机直接忽略。
         if (cameraDitc.TryGetValue(camId, out var camera))
         {
-            // 创建本次帧通知，并原子替换 Latest（替换过程不会被其他线程拆开执行）。
-            // 后台识别线程会同时读取并清空 Latest，因此使用 Interlocked 协调访问。
-            // Exchange 会返回旧通知，这里不需要它：只保留最新一条，不排队。
-            Interlocked.Exchange(ref camera.Latest, new FrameNotice(frameIndex));
+            // 避免同一相机的并发回调交叉修改起点和待处理通知；锁内只有轻量状态操作。
+            lock (camera.NoticeSync)
+            {
+                if (camera.LastReceivedFrameIndex == frameIndex) return;
+                // 第一帧立即提交；帧号回退时按新一轮处理，重新打开也会创建全新状态。
+                if (!camera.FirstFrameIndex.HasValue || frameIndex < camera.LastReceivedFrameIndex)
+                    camera.FirstFrameIndex = frameIndex;
+                camera.LastReceivedFrameIndex = frameIndex;
+
+                // 使用无符号差值避免两个 long 帧号相减溢出；起点为 1、间隔为 5 时选中 1、6、11……。
+                ulong offset = unchecked((ulong)frameIndex - (ulong)camera.FirstFrameIndex.Value);
+                if (offset % (ulong)camera.FrameInterval != 0) return;
+
+                // 创建本次帧通知，并原子替换 Latest（替换过程不会被其他线程拆开执行）。
+                // 后台识别线程会同时读取并清空 Latest，因此使用 Interlocked 协调访问。
+                // Exchange 会返回旧通知，这里不需要它：只保留最新一条，不排队。
+                Interlocked.Exchange(ref camera.Latest, new FrameNotice(frameIndex));
+            }
         }
     }
 
@@ -90,23 +110,13 @@ public sealed class DetectionScheduler(IDetectManager detector, ILogger<Detectio
                     {
                         // 快照中的相机可能已注销或重新打开。
                         if (!cameraDitc.TryGetValue(camId, out var current) || current != camera) continue;
-                        // 从上次“开始识别”算起，未达到配置间隔就跳过这台相机。
-                        // 跳过时保留最新通知，期间相机回调仍会用更新的通知覆盖它。
-                        if (camera.LastStartedTimestamp.HasValue)
-                        {
-                            double elapsedMilliseconds = Stopwatch.GetElapsedTime(camera.LastStartedTimestamp.Value).TotalMilliseconds;
-                            if (elapsedMilliseconds < camera.IntervalMilliseconds)
-                                continue;
-                        }
-
-                        // 间隔已到，也必须有新通知才识别；取出后清空，避免重复处理。
+                        // 回调已按帧间隔筛选，必须有新通知才识别；取出后清空，避免重复处理。
                         var frame = Interlocked.Exchange(ref camera.Latest, null);
                         if (frame is null) continue;
 
                         token.ThrowIfCancellationRequested();
                         //获取的是一个高精度计时器当前的时间戳（计数值）
                         var started = Stopwatch.GetTimestamp();
-                        camera.LastStartedTimestamp = started; // 在调用前记时，识别失败也遵守间隔。
                         var result = await detector.LaneDetectAsync(camId, camera.Roi, token);
                         logger.LogDebug("相机 {CameraId} 识别完成，触发帧序号 {TriggerFrameIndex}，结果数 {Count}，耗时 {ElapsedMs:F1}ms",
                             camera.Id, frame.Index, result.count, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
