@@ -63,6 +63,7 @@ public sealed class InspectionService(ISqlSugarClient database) : IInspectionSer
         {
             InspectionRecordId = inspectionRecordId,
             FilePath = request.FilePath.Trim(),
+            IsUploaded = false,
             CreateTime = request.CreateTime ?? DateTime.Now,
             IsDelete = false
         };

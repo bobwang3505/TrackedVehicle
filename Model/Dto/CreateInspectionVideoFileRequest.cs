@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace TrackedVehicle.Model.Dto;
 
 /// <summary>
-/// 登记一个巡检视频切片的请求。
+/// 登记一个已录制完成的巡检视频切片的请求。
 /// </summary>
 public sealed class CreateInspectionVideoFileRequest
 {

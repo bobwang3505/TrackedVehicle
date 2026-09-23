@@ -73,6 +73,29 @@ lock (_sync)
 
 启动时不会自动发送 `HelloWorld`。当前只实现 TCP 传输，尚未实现 PLC 业务报文、应答匹配或控制指令；TCP 一次读取可能是半包或多个报文，不能直接视为一条完整消息。后续按协议增加缓存拆包和业务处理。
 
+## 数据库表结构更新（SqlSugar CodeFirst）
+
+项目使用 SQLite 和 SqlSugar CodeFirst。`Program.cs` 在每次启动时调用 `app.InitializeDatabase()`，由 `Extensions/DatabaseInitializerExtensions.cs` 执行：
+
+```csharp
+database.DbMaintenance.CreateDatabase();
+database.CodeFirst.InitTables<InspectionRecord, InspectionVideoFile>();
+```
+
+数据库或表不存在时创建；表已存在时，根据实体补充缺少的字段。修改实体后需要重新编译并启动程序，只有编译不会更新数据库；部署到设备时，需要部署新版本并重启设备上的程序。
+
+更新步骤：
+
+1. 在实体中新增属性，配置好 `SugarColumn` 的可空性、默认值等。新增实体表时，还需要将实体加入 `InitTables` 的初始化列表。
+2. 重新编译并启动程序，启动时执行表结构同步。
+3. 查看启动时输出的 SqlSugar SQL，并在数据库工具中刷新表结构，确认字段已经添加。
+
+例如文件实体新增 `S3Key` 和 `IsUploaded` 后，启动时会给 `inspection_video_files` 表添加相应列：`S3Key` 允许为空，已有记录初始为 `NULL`；`IsUploaded` 配置了 `DefaultValue = "0"`，已有记录初始为 `false`。
+
+数据库文件由 `Database:SQLitePath` 配置，当前为 `Data/tracked_vehicle.db`；相对路径按程序的内容根目录解析。检查更新结果时，应打开运行实例实际使用的数据库文件。
+
+当前 SQLite CodeFirst 配置用于新增表和字段，不会因实体删除属性就自动删除数据库中的旧列。例如之前已经建过 `IsRecordingCompleted` 列，删除实体属性后，数据库可能仍保留该列。字段删除、改名、修改类型或约束需单独处理数据库迁移，不能直接按新增字段的方式理解。表结构同步也不会自动完成业务数据转换或回填；本次设置默认值只表示已有文件默认为未上传。
+
 ## 雪花 ID
 
 使用 [Yitter.IdGenerator](https://github.com/yitter/IdGenerator) 1.0.14 的雪花漂移算法（Method = 1）。参考 [ABP 的生成器接口设计](https://abp.io/docs/10.4/framework/infrastructure/guid-generation)，将 ID 生成作为独立的基础设施服务，集中放在 `Infrastructure/IdGeneration`：
