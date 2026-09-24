@@ -6,7 +6,7 @@ using TrackedVehicle.Model.Dto;
 
 namespace TrackedVehicle.Core;
 
-/// <summary>接收录像完成通知，后台登记文件；暂不绑定 SDK 回调和巡检触发时机。</summary>
+/// <summary>接收相机录像完成回调的通知，后台登记文件；巡检开始、结束由业务调用方决定。</summary>
 public sealed class RecordingFileRegistrationService : BackgroundService
 {
     private sealed class CompletedFile

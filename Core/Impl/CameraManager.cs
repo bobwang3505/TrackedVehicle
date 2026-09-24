@@ -17,18 +17,23 @@ public sealed class CameraManager : ICameraManager
     private readonly AvFrameIndexFunc _frameCallback;
     private readonly DetectionScheduler _detectionScheduler;
     private readonly AvStatusFunc _statusCallback;
-    private readonly AvMediaFinishFunc _mediaFinishCallback;
+    private readonly RecordingFileRegistrationService _recordingFiles;
+    // 每次录像的委托捕获固定巡检 ID。SDK 未声明停止后绝无迟到回调，因此在此管理器存活期间保留委托。
+    // 不能开始下一趟时直接替换并释放旧委托，否则原生端仍持有的函数指针可能失效。
+    private readonly List<AvMediaFinishFunc> _mediaFinishCallbacks = new();
     private int? _camId;
     private int? _recordId;
+    private long? _recordInspectionId;
 
-    public CameraManager(CameraOptions options, ILogger<CameraManager> logger, DetectionScheduler detectionScheduler)
+    public CameraManager(CameraOptions options, ILogger<CameraManager> logger, DetectionScheduler detectionScheduler,
+        RecordingFileRegistrationService recordingFiles)
     {
         _options = options;
         _logger = logger;
         _detectionScheduler = detectionScheduler;
         _frameCallback = OnFrameIndex;
         _statusCallback = OnStatus;
-        _mediaFinishCallback = OnMediaFinish;
+        _recordingFiles = recordingFiles;
     }
 
     public string Id => _options.Id;
@@ -43,16 +48,23 @@ public sealed class CameraManager : ICameraManager
         }
     }
 
-    public Task<int> StartRecordingAsync(string path, CancellationToken cancellationToken)
+    public Task<int> StartRecordingAsync(long inspectionId, string path, CancellationToken cancellationToken)
     {
         // 检查录像状态、调用 SDK、保存录像 ID 一起加锁，避免重复录像或与关闭操作冲突。
         // NativeCameraId 内部也会加锁；同一线程可以再次进入同一把锁，不会把自己锁住。
         lock (_sync)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (inspectionId <= 0)
+                throw new ArgumentOutOfRangeException(nameof(inspectionId), "必须传入已创建的巡检记录 ID。");
             var camId = NativeCameraId;
-            if (_recordId is int existingId)
+            if (_recordId.HasValue)
+            {
+                int existingId = _recordId.Value;
+                if (_recordInspectionId != inspectionId)
+                    throw new InvalidOperationException($"相机 {Id} 正在为巡检 {_recordInspectionId} 录像，请先停止再切换巡检。");
                 return Task.FromResult(existingId);
+            }
 
             ArgumentException.ThrowIfNullOrWhiteSpace(path);
             ValidateNativeString(path, "录像路径");
@@ -61,13 +73,20 @@ public sealed class CameraManager : ICameraManager
 
             var mediaInfo = new MediaInfo { chPath = path };
             var recordId = -1;
+            // 在调用 SDK 前创建并保留委托，兼容启动调用尚未返回就发生回调的情况。
+            // 通过闭包绑定本次参数，不读取可变的“当前巡检”，迟到的旧回调仍属于原来的巡检。
+            AvMediaFinishFunc callback = (id, fileName, startTime, endTime) =>
+                OnMediaFinish(inspectionId, id, fileName, startTime, endTime);
+
+            _mediaFinishCallbacks.Add(callback);
             var result = NativeMethods.RobotX_StartRealTimeRecord(camId, ref mediaInfo,
-                _options.Record.SegmentSeconds, _mediaFinishCallback, ref recordId);
+                _options.Record.SegmentSeconds, callback, ref recordId);
             if (result < 0)
                 throw new InvalidOperationException($"相机 {Id} 开始录像失败，SDK 返回码：{result}。");
 
             // SDK 返回值也是有效录像编号，兼容未填写输出参数的实现。
             _recordId = recordId >= 0 ? recordId : result;
+            _recordInspectionId = inspectionId;
             _logger.LogInformation("相机 {CameraId} 开始录像，录像 ID：{RecordId}", Id, _recordId);
             return Task.FromResult(_recordId.Value);
         }
@@ -94,6 +113,7 @@ public sealed class CameraManager : ICameraManager
             throw new InvalidOperationException($"相机 {Id} 停止录像失败，SDK 返回码：{result}。");
 
         _recordId = null;
+        _recordInspectionId = null;
         _logger.LogInformation("相机 {CameraId} 已停止录像，录像 ID：{RecordId}", Id, recordId);
     }
 
@@ -193,7 +213,7 @@ public sealed class CameraManager : ICameraManager
         }
     }
 
-    private void OnMediaFinish(int id, string fileName, long startTime, long endTime)
+    private void OnMediaFinish(long inspectionId, int id, string fileName, long startTime, long endTime)
     {
         // 不获取生命周期锁；分段完成不代表整个录像会话结束。
         try
@@ -202,6 +222,13 @@ public sealed class CameraManager : ICameraManager
             // 转为本地 DateTime，与当前 DateTime.Now 的存库时间口径一致；设备联调时核对。
             var startedAt = DateTimeOffset.FromUnixTimeMilliseconds(startTime).LocalDateTime;
             var endedAt = DateTimeOffset.FromUnixTimeMilliseconds(endTime).LocalDateTime;
+            // 回调只提交已完成切片的信息，不获取 _sync，不等待存库，也不按切片创建后台任务。
+            if (!_recordingFiles.TryNotifyCompleted(inspectionId, fileName, Id, startedAt, endedAt))
+            {
+                _logger.LogError("录像完成通知未接收，需补登记：巡检 {InspectionId}，相机 {CameraId}，文件 {FileName}，开始 {StartTime:O}，结束 {EndTime:O}",
+                    inspectionId, Id, fileName, startedAt, endedAt);
+                return;
+            }
             _logger.LogInformation("相机 {CameraId} 录像分段完成，原生 ID：{NativeId}，文件：{FileName}，开始：{StartTime}，结束：{EndTime}",
                 Id, id, fileName, startedAt, endedAt);
         }

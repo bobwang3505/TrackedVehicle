@@ -19,7 +19,8 @@
 
 ```csharp
 var camera = controlCenter.Cameras[0];
-await camera.StartRecordingAsync("/data/records", cancellationToken);
+var inspection = await inspectionService.StartAsync(null); // 注入 IInspectionService，先创建巡检记录。
+await camera.StartRecordingAsync(inspection.Id, "/data/records", cancellationToken);
 await controlCenter.Detect.InitModelAsync("/data/models/lane.engine", cancellationToken);
 var result = await controlCenter.Detect.LaneDetectAsync(camera.NativeCameraId,
     new RoiInfo { nX = 0, nY = 0, nWidth = 640, nHeight = 480 }, cancellationToken);
@@ -98,7 +99,7 @@ database.CodeFirst.InitTables<InspectionRecord, InspectionVideoFile>();
 
 ## 巡检记录与 RustFS 视频上传
 
-开始、结束和录像完成的业务触发时机暂未接入 PLC 或相机 SDK；以下入口已经可以调用：
+巡检开始、结束的业务触发时机暂未接入 PLC；录像完成回调已连接后台存库通知入口。以下入口可以调用：
 
 | 时机 | 调用入口 | 行为 |
 | --- | --- | --- |
@@ -107,9 +108,9 @@ database.CodeFirst.InitTables<InspectionRecord, InspectionVideoFile>();
 | 已完成切片，处于普通异步业务流程 | `IInspectionService.AddVideoFileAsync(inspectionId, request)` | 等待文件入库，后续由后台定期扫描上传 |
 | 已完成切片，处于原生回调 | `RecordingFileRegistrationService.TryNotifyCompleted(inspectionId, fullPath, cameraId, startTime, endTime)` | 只提交完成通知，后台串行存库，上传由定期扫描负责，不在回调中等待数据库或网络 |
 
-巡检结束时间按业务结束事件记录，不等待上传。停止录像产生的最后一个切片仍可登记到已结束的巡检中。`TryNotifyCompleted` 必须传该次录像所属的巡检 ID 和已经写完的文件完整路径，不能读取可能已经切换的“当前巡检 ID”。已约定巡检 ID 使用开始巡检时新建记录的 ID，回调文件名为完整路径；回调时间暂按 Unix 毫秒时间戳转换为本地 DateTime。当前 CameraManager.OnMediaFinish 已转换时间并记录日志，尚未绑定巡检 ID 或调用 TryNotifyCompleted；SDK 时间格式及最后一个切片的回调时序需在设备联调时核对。
+巡检结束时间按业务结束事件记录，不等待上传。停止录像产生的最后一个切片仍可登记到已结束的巡检中。`TryNotifyCompleted` 必须传该次录像所属的巡检 ID 和已经写完的文件完整路径，不能读取可能已经切换的“当前巡检 ID”。已约定巡检 ID 使用开始巡检时新建记录的 ID，回调文件名为完整路径；回调时间暂按 Unix 毫秒时间戳转换为本地 DateTime。StartRecordingAsync(inspectionId, path, token) 必须传入已存库的巡检 ID；五台相机参与同一趟巡检时共用该 ID，但使用各自独立的文件目录。每次录像的委托捕获固定巡检 ID，OnMediaFinish 转换时间后调用 TryNotifyCompleted，旧回调迟到也不会改挂到下一趟。正在录像时不允许切换巡检 ID，需先停止；同一巡检重复启动返回现有录像编号。SDK 时间格式及最后一个切片的回调时序需在设备联调时核对。SDK 尚未声明停止后不会再调用旧委托，因此当前在 CameraManager 存活期间保留历次录像委托，不在停止时释放。
 
-完成通知入口返回 `true` 只表示进入内存队列，不代表已存库。队列满、停止或参数无效时返回 `false`，未来接入回调时必须保留并补交通知。后台遇到存库异常每 5 秒重试当前通知；同一巡检、同一相机、同一路径的重复通知复用已有文件记录，每个切片必须使用唯一且不被覆盖的路径。正常停机先停止相机，再尽量排空完成通知，最后停止上传。异常断电可能丢失尚未入库的内存通知，这部分无法靠数据库扫描恢复，需依据本地文件和所属巡检补登记；已入库文件则可重启恢复上传。
+完成通知入口返回 `true` 只表示进入内存队列，不代表已存库。队列满、停止或参数无效时返回 `false`；当前相机回调会记录含巡检 ID、相机、完整路径及起止时间的错误日志，需人工补登记，不会阻塞回调或自动重试未接收通知。后台遇到存库异常每 5 秒重试当前通知；同一巡检、同一相机、同一路径的重复通知复用已有文件记录，每个切片必须使用唯一且不被覆盖的路径。正常停机先停止相机，再尽量排空完成通知，最后停止上传。异常断电可能丢失尚未入库的内存通知，这部分无法靠数据库扫描恢复，需依据本地文件和所属巡检补登记；已入库文件则可重启恢复上传。
 
 文件表新增 CameraId、StartTime、EndTime：分别保存配置中的相机字符串业务 Id 和切片实际录像起止时间。旧记录缺失的信息允许为空，不以入库时间补填；新登记请求必须提供这三项，结束时间不能早于开始时间。重新编译并启动后由 CodeFirst 添加字段。后续回放按巡检 ID 和 CameraId 筛选，再按 StartTime 排序；CreateTime 仍表示入库记录创建时间。SDK 回调时间暂用 DateTimeOffset.FromUnixTimeMilliseconds(value).LocalDateTime 转换，后续接入完成通知时传转换后的值；以部署设备的本地时区为准，联调发现时间格式不符时再调整。
 
