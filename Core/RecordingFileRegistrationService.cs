@@ -30,14 +30,12 @@ public sealed class RecordingFileRegistrationService : BackgroundService
 
     private readonly Channel<CompletedFile> _notices;
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly VideoUploadQueue _uploadQueue;
     private readonly ILogger<RecordingFileRegistrationService> _logger;
 
-    public RecordingFileRegistrationService(IServiceScopeFactory scopeFactory, VideoUploadQueue uploadQueue,
+    public RecordingFileRegistrationService(IServiceScopeFactory scopeFactory,
         IOptions<VideoUploadOptions> options, ILogger<RecordingFileRegistrationService> logger)
     {
         _scopeFactory = scopeFactory;
-        _uploadQueue = uploadQueue;
         _logger = logger;
         _notices = Channel.CreateBounded<CompletedFile>(new BoundedChannelOptions(options.Value.QueueCapacity)
         {
@@ -82,7 +80,6 @@ public sealed class RecordingFileRegistrationService : BackgroundService
                             .Select(file => file.Id).FirstAsync();
                         if (existingId != 0)
                         {
-                            _uploadQueue.TryEnqueue(existingId);
                             break;
                         }
                         var inspection = scope.ServiceProvider.GetRequiredService<IInspectionService>();

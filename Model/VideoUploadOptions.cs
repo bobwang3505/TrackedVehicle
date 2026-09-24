@@ -10,6 +10,7 @@ public sealed class VideoUploadOptions
     public string AccessKey { get; set; } = string.Empty;
     public string SecretKey { get; set; } = string.Empty;
     public int MaxConcurrency { get; set; } = 2;
+    /// <summary>录像完成后等待存库的通知队列容量，不用于上传。</summary>
     public int QueueCapacity { get; set; } = 100;
     public int ScanIntervalSeconds { get; set; } = 60;
 }

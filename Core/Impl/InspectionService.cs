@@ -7,7 +7,7 @@ namespace TrackedVehicle.Core.Impl;
 /// <summary>
 /// 巡检记录业务服务实现。
 /// </summary>
-public sealed class InspectionService(ISqlSugarClient database, VideoUploadQueue uploadQueue) : IInspectionService
+public sealed class InspectionService(ISqlSugarClient database) : IInspectionService
 {
     public async Task<InspectionRecord> StartAsync(DateTime? startTime)
     {
@@ -84,8 +84,6 @@ public sealed class InspectionService(ISqlSugarClient database, VideoUploadQueue
         };
 
         await database.Insertable(videoFile).ExecuteCommandAsync();
-        // 先持久化再通知上传；队列满或上传关闭时记录仍在库中，启用后的扫描会补入。
-        uploadQueue.TryEnqueue(videoFile.Id);
         return videoFile;
     }
 
