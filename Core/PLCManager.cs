@@ -49,7 +49,10 @@ public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCMana
                         using var stream = client.GetStream();
                         lock (_connectionLock) { _stream = stream; }
                         logger.LogInformation("PLC TCP 连接已建立：{IP}:{Port}", settings.IP, settings.Port);
-                        await ReceiveDataAsync(stream, stoppingToken);
+                        if (settings.SendTestEnabled)
+                            await RunSendTestAsync(stream, stoppingToken);
+                        else
+                            await ReceiveDataAsync(stream, stoppingToken);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                     {
@@ -116,6 +119,41 @@ public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCMana
         finally
         {
             _sendLock.Release();
+        }
+    }
+
+    /// <summary>本次连接同时接收和测试发送，任一方向结束后停止另一方向，再交给外层重连。</summary>
+    private async Task RunSendTestAsync(NetworkStream stream, CancellationToken stoppingToken)
+    {
+        using var connection = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var receiveTask = ReceiveDataAsync(stream, connection.Token);
+        var sendTask = SendTestDataAsync(connection.Token);
+        try
+        {
+            await Task.WhenAny(receiveTask, sendTask);
+        }
+        finally
+        {
+            // 先取消本次连接的读写和延时，再等待两个任务退出，避免旧发送循环进入新连接。
+            connection.Cancel();
+            try { await Task.WhenAll(receiveTask, sendTask); }
+            catch (OperationCanceledException) when (connection.IsCancellationRequested) { }
+        }
+    }
+
+    private async Task SendTestDataAsync(CancellationToken cancellationToken)
+    {
+        // 直接发送 25 个原始字节，不发送十六进制字符串；每次重连从 FF 开始。
+        var data = new byte[25];
+        data[0] = 0xFF;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await SendDataAsync(data, cancellationToken);
+            logger.LogInformation("PLC 测试发送 {ByteCount} 字节：{Hex}", data.Length, BitConverter.ToString(data));
+            data[0] = data[0] == 0xFF ? (byte)0x00 : (byte)0xFF;
+            // 每次写入完成后等待 1 秒；停止或断线时取消等待，不积压测试报文。
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
         }
     }
 
