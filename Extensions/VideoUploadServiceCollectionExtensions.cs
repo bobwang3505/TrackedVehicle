@@ -21,6 +21,7 @@ public static class VideoUploadServiceCollectionExtensions
             .ValidateOnStart();
         services.AddHostedService<VideoUploadBackgroundService>();
         services.AddSingleton<RecordingFileRegistrationService>();
+        // 把上面AddSingleton<RecordingFileRegistrationService>()注册的同一个实例作为后台服务启动，运行 ExecuteAsync()，消费队列并存库。
         services.AddHostedService(provider => provider.GetRequiredService<RecordingFileRegistrationService>());
         return services;
     }
