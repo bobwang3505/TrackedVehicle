@@ -23,6 +23,11 @@ public sealed class DetectManager(ILogger<DetectManager> logger) : IDetectManage
 
             // 重新初始化前先清除成功标记，若 SDK 失败，后续检测不能沿用旧的成功状态。
             _initialized = false;
+            // 相对路径以程序所在目录为基准，避免从其他目录启动时找不到随程序发布的模型。
+            // 绝对路径保持原意，仍可指定开发板上的外部模型文件。
+            modelPath = Path.GetFullPath(modelPath, AppContext.BaseDirectory);
+            if (!File.Exists(modelPath))
+                throw new FileNotFoundException("检测模型文件不存在。", modelPath);
             CheckResult(NativeMethods.RobotX_InitModel(modelPath), "初始化模型");
             _initialized = true;
             logger.LogInformation("检测模型初始化成功");

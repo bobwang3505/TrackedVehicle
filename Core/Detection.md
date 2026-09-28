@@ -8,7 +8,7 @@
 
 ## 配置及观察
 
-- `Vehicle.DetectionModelPath`：填写运行 SDK 的设备上的真实模型路径。
+- `Vehicle.DetectionModelPath`：默认 `robot.rknn`，模型随程序复制到输出和发布目录；相对路径按程序所在目录解析，也可填写设备上的绝对路径。初始化前检查文件存在。
 - `Vehicle.Cameras[i].DetectionEnabled`：设为 `true` 启用该相机识别。
 - `Vehicle.Cameras[i].Detection.FrameInterval`：默认 5，必须大于等于 1。以每台相机登记后收到的首个帧号为起点，帧号差为间隔的整数倍时提交通知；例如起点为 1 时选中 1、6、11、16……，设为 1 时每帧都可触发。25 FPS 时理想情况下每秒触发 5 次，不再限制识别开始时间必须相隔 200ms。配置在启动时读取，修改后重启；旧的 IntervalMilliseconds 配置应替换为 FrameInterval。
 - `Vehicle.Cameras[i].Detection.ROI`：填写 X、Y、Width、Height。坐标非负，宽高必须大于零且应位于实际图像内。启用前应核对配置与实际图像尺寸。

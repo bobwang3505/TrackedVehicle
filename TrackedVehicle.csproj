@@ -14,6 +14,11 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <TargetPath>%(Filename)%(Extension)</TargetPath>
     </None>
+    <None Update="NativeInterop\linux-arm64\*.rknn">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>%(Filename)%(Extension)</TargetPath>
+    </None>
   </ItemGroup>
 
   <ItemGroup>
