@@ -26,6 +26,8 @@ public sealed class DetectManager(ILogger<DetectManager> logger) : IDetectManage
             // 相对路径以程序所在目录为基准，避免从其他目录启动时找不到随程序发布的模型。
             // 绝对路径保持原意，仍可指定开发板上的外部模型文件。
             modelPath = Path.GetFullPath(modelPath, AppContext.BaseDirectory);
+            logger.LogInformation("准备初始化检测模型，传给 RobotX_InitModel 的完整路径：{ModelPath}，文件存在：{Exists}",
+                modelPath, File.Exists(modelPath));
             if (!File.Exists(modelPath))
                 throw new FileNotFoundException("检测模型文件不存在。", modelPath);
             CheckResult(NativeMethods.RobotX_InitModel(modelPath), "初始化模型");

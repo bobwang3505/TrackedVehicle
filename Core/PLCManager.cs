@@ -163,7 +163,8 @@ public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCMana
             var speed = BinaryPrimitives.ReadUInt16BigEndian(buffer.AsSpan(6, 2));
             logger.LogInformation("收到 PLC 8 字节：{Hex}，模式 {Mode}，车速原值 {Speed}",
                 BitConverter.ToString(buffer), mode, speed);
-            if (mode == 3) _automaticModeReceived.TrySetResult();
+            // 临时联调：用模式 0 触发开相机、录像和识别；PLC 联调完成后将下面的 0 改回 3。
+            if (mode == 0) _automaticModeReceived.TrySetResult();
         }
     }
 }

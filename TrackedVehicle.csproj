@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591</NoWarn>
+    <!-- 发布包位于项目内，排除旧产物，避免再次发布时递归复制。 -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,7 +19,7 @@
     <None Update="NativeInterop\linux-arm64\*.rknn">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-      <TargetPath>%(Filename)%(Extension)</TargetPath>
+      <TargetPath>models/%(Filename)%(Extension)</TargetPath>
     </None>
   </ItemGroup>
 
