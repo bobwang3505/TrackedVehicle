@@ -12,7 +12,7 @@
 - `Vehicle.Cameras[i].DetectionEnabled`：设为 `true` 启用该相机识别。
 - `Vehicle.Cameras[i].Detection.FrameInterval`：默认 5，必须大于等于 1。以每台相机登记后收到的首个帧号为起点，帧号差为间隔的整数倍时提交通知；例如起点为 1 时选中 1、6、11、16……，设为 1 时每帧都可触发。25 FPS 时理想情况下每秒触发 5 次，不再限制识别开始时间必须相隔 200ms。配置在启动时读取，修改后重启；旧的 IntervalMilliseconds 配置应替换为 FrameInterval。
 - `Vehicle.Cameras[i].Detection.ROI`：填写 X、Y、Width、Height。坐标非负，宽高必须大于零且应位于实际图像内。启用前应核对配置与实际图像尺寸。
-- 将 `Logging.LogLevel.TrackedVehicle.Core.DetectionScheduler` 设为 `Debug`，观察相机、触发帧号、centerX 及识别耗时。当前仅记录结果摘要，告警和入库尚未接入。
+- 每次识别成功以 `Information` 级别记录相机、触发帧号、centerX 及识别耗时，失败以 `Error` 级别记录。默认配置下，发布到板子直接运行即可在控制台和日志文件中查看，不需要调试器。当前仅记录结果摘要，告警和入库尚未接入。
 
 每台相机独立记录帧号起点，重复帧号忽略，帧号回退时重新设定起点，重新打开后状态重置。正常筛选以 SDK 帧号按顺序递增为前提；头文件未声明回调顺序、丢帧及重连后的帧号规则，需设备验证。跳过的帧号不补做，普通帧不会覆盖符合条件的通知。所有相机共享算力，识别慢时只保留最新的符合条件的通知，不保证每个选中帧都执行识别。回调中的帧号仅为触发信息：OrientationPosDetect 不接收帧号，实际识别哪一帧取决于 SDK。还需在 Linux ARM64 设备上确认 SDK 支持从回调以外的后台线程执行识别。
 
