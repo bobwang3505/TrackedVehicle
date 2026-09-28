@@ -117,9 +117,9 @@ public sealed class DetectionScheduler(IDetectManager detector, ILogger<Detectio
                         token.ThrowIfCancellationRequested();
                         //获取的是一个高精度计时器当前的时间戳（计数值）
                         var started = Stopwatch.GetTimestamp();
-                        var result = await detector.LaneDetectAsync(camId, camera.Roi, token);
-                        logger.LogDebug("相机 {CameraId} 识别完成，触发帧序号 {TriggerFrameIndex}，结果数 {Count}，耗时 {ElapsedMs:F1}ms",
-                            camera.Id, frame.Index, result.count, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                        var result = await detector.OrientationPosDetectAsync(camId, camera.Roi, token);
+                        logger.LogDebug("相机 {CameraId} 识别完成，触发帧序号 {TriggerFrameIndex}，centerX {CenterX}，耗时 {ElapsedMs:F1}ms",
+                            camera.Id, frame.Index, result.centerX, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
                     }
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                     catch (Exception exception)

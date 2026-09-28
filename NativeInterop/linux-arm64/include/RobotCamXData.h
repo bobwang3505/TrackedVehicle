@@ -32,7 +32,7 @@ namespace robot {
         int nHeight;
     };
 
-    struct LaneDetectInfo {
+    struct DetectInfo {
         int nBoxX;
         int nBoxY;
         int nBoxWidth;
@@ -40,9 +40,8 @@ namespace robot {
         int valid;
     };
 
-    struct LaneDetectGroup {
-        LaneDetectInfo infos[MAX_COUNT]{};
-        int count = 0;
+    struct OrientationPosInfo {
+        int centerX = 0;
     };
 
     /** status 1: 连接成功 - 1: 连接失败*/

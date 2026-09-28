@@ -43,7 +43,7 @@ extern "C" ROBOT_CAM_X_API int RobotX_CloseCam(int camId);
  * duration: 录制间隔时长(sec)
  * finishFunc: 录制完成回调
  * recId: id
- * return >=0 record_id, a negative on failure
+ *  return 0 on success, a negative on failure
  */
 extern "C" ROBOT_CAM_X_API int RobotX_StartRealTimeRecord(int camId, MediaInfo* mediaInfo, int duration,
                                                    AvMediaFinishFunc finishFunc, int& recId);
@@ -68,10 +68,10 @@ extern "C" ROBOT_CAM_X_API int RobotX_StopRealTimeRecord(int recId);
 extern "C" ROBOT_CAM_X_API int RobotX_InitModel(const char* modelPath);
 
 /**
- * 轨道检测
+ * 方向定位检测
  * return 0 on success, a negative on failure
  */
-extern "C" ROBOT_CAM_X_API int RobotX_LaneDetect(int camId, const RoiInfo* roi, LaneDetectGroup* laneDetGrp);
+extern "C" ROBOT_CAM_X_API int RobotX_OrientationPosDetect(int camId, const RoiInfo* roi, OrientationPosInfo* orientationPosInfo);
 
 /**
  * 清除检测结果

@@ -2,7 +2,7 @@ using TrackedVehicle.NativeInterop;
 
 namespace TrackedVehicle.Core.Impl;
 
-/// <summary>管理 SDK 全局模型，并串行执行模型初始化、轨道检测及结果清理。</summary>
+/// <summary>管理 SDK 全局模型，并串行执行模型初始化、方向定位检测及结果清理。</summary>
 /// <remarks>内部同步调用 SDK；检测期间需保持相机打开。</remarks>
 public sealed class DetectManager(ILogger<DetectManager> logger) : IDetectManager
 {
@@ -31,7 +31,7 @@ public sealed class DetectManager(ILogger<DetectManager> logger) : IDetectManage
     }
 
     /// <inheritdoc />
-    public Task<LaneDetectGroup> LaneDetectAsync(int camId, RoiInfo roi, CancellationToken cancellationToken)
+    public Task<OrientationPosInfo> OrientationPosDetectAsync(int camId, RoiInfo roi, CancellationToken cancellationToken)
     {
         lock (_sync)
         {
@@ -42,12 +42,10 @@ public sealed class DetectManager(ILogger<DetectManager> logger) : IDetectManage
             if (roi.nX < 0 || roi.nY < 0 || roi.nWidth <= 0 || roi.nHeight <= 0)
                 throw new ArgumentException("检测区域坐标不能为负数，宽高必须大于 0。", nameof(roi));
 
-            // 为原生结果结构体准备固定长度数组；SDK 写入结果后，只读取 count 指定的有效项。
-            var group = new LaneDetectGroup { infos = new LaneDetectInfo[NativeMethods.MAX_COUNT] };
-            CheckResult(NativeMethods.RobotX_LaneDetect(camId, in roi, ref group), "轨道检测");
-            if (group.count < 0 || group.count > NativeMethods.MAX_COUNT)
-                throw new InvalidOperationException($"SDK 返回的检测结果数量无效：{group.count}。");
-            return Task.FromResult(group);
+            // 新版 SDK 只输出 centerX；未约定坐标基准及无目标标记，不自行换算或判断有效性。
+            var result = new OrientationPosInfo();
+            CheckResult(NativeMethods.RobotX_OrientationPosDetect(camId, in roi, ref result), "方向定位检测");
+            return Task.FromResult(result);
         }
     }
 

@@ -81,11 +81,13 @@ public sealed class CameraManager : ICameraManager
             _mediaFinishCallbacks.Add(callback);
             var result = NativeMethods.RobotX_StartRealTimeRecord(camId, ref mediaInfo,
                 _options.Record.SegmentSeconds, callback, ref recordId);
-            if (result < 0)
+            if (result != 0)
                 throw new InvalidOperationException($"相机 {Id} 开始录像失败，SDK 返回码：{result}。");
 
-            // SDK 返回值也是有效录像编号，兼容未填写输出参数的实现。
-            _recordId = recordId >= 0 ? recordId : result;
+            // 返回值是状态码，不能作为录像编号；后续停止录像只使用 SDK 输出的 recId。
+            if (recordId < 0)
+                throw new InvalidOperationException($"相机 {Id} 开始录像返回成功，但 SDK 未输出有效录像 ID：{recordId}。");
+            _recordId = recordId;
             _recordInspectionId = inspectionId;
             _logger.LogInformation("相机 {CameraId} 开始录像，录像 ID：{RecordId}", Id, _recordId);
             return Task.FromResult(_recordId.Value);

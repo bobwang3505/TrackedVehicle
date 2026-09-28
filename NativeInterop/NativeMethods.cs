@@ -44,7 +44,7 @@ namespace TrackedVehicle.NativeInterop
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct LaneDetectInfo
+    public struct DetectInfo
     {
         public int nBoxX;
         public int nBoxY;
@@ -54,12 +54,9 @@ namespace TrackedVehicle.NativeInterop
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct LaneDetectGroup
+    public struct OrientationPosInfo
     {
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = NativeMethods.MAX_COUNT)]
-        public LaneDetectInfo[] infos;
-
-        public int count;
+        public int centerX;
     }
 
     /// <summary>C++ 摄像与算法接口，对应 RobotCamXApi.h 和 RobotCamXData.h。</summary>
@@ -77,7 +74,7 @@ namespace TrackedVehicle.NativeInterop
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int RobotX_CloseCam(int camId);
 
-        /// <summary>开始录像，duration 为分段秒数，返回非负录像 ID，负数失败；recId 为输出编号。</summary>
+        /// <summary>开始录像，duration 为分段秒数，返回 0 成功、负数失败；录像编号由 recId 输出。</summary>
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int RobotX_StartRealTimeRecord(int camId, ref MediaInfo mediaInfo,
             int duration, AvMediaFinishFunc finishFunc, ref int recId);
@@ -86,19 +83,19 @@ namespace TrackedVehicle.NativeInterop
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int RobotX_StopRealTimeRecord(int recId);
 
-        /// <summary>调用原生 SDK 初始化模型，轨道检测前需先成功调用。</summary>
+        /// <summary>调用原生 SDK 初始化模型，方向定位检测前需先成功调用。</summary>
         /// <param name="modelPath">运行 SDK 的设备上的模型路径，以 UTF-8 字符串传给原生接口。</param>
         /// <returns>0 成功，负数失败。</returns>
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int RobotX_InitModel([MarshalAs(UnmanagedType.LPUTF8Str)] string modelPath);
 
-        /// <summary>对指定原生相机的指定区域执行轨道检测；调用前需初始化模型，并保持相机打开。</summary>
+        /// <summary>对指定原生相机的指定区域执行方向定位检测；调用前需初始化模型，并保持相机打开。</summary>
         /// <param name="camId">打开相机后获得的原生相机编号，不是配置中的业务 Id。</param>
         /// <param name="roi">检测区域的起点坐标和宽高。</param>
-        /// <param name="laneDetGrp">接收检测结果；调用前将 infos 初始化为长度 MAX_COUNT 的数组，成功后仅前 count 项有效。</param>
+        /// <param name="orientationPosInfo">接收 centerX；头文件未说明坐标基准和无目标时的取值，按原值返回。</param>
         /// <returns>0 成功，负数失败。</returns>
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-        public static extern int RobotX_LaneDetect(int camId, in RoiInfo roi, ref LaneDetectGroup laneDetGrp);
+        public static extern int RobotX_OrientationPosDetect(int camId, in RoiInfo roi, ref OrientationPosInfo orientationPosInfo);
 
         /// <summary>清除指定原生相机的检测结果；与关闭相机是不同的 SDK 操作。</summary>
         /// <param name="camId">需要清除检测结果的原生相机编号，不是配置中的业务 Id。</param>

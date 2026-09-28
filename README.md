@@ -8,7 +8,7 @@
 - `VehicleOptions` 映射保存路径和相机数组，端口、FPS、切片秒数使用数字。
 - `CameraManagerFactory` 为每个启用的相机创建独立对象，控制中心持有这些对象；不是多个相机共用一个单例相机对象。
 - `CameraManager.OpenAsync` / `CloseAsync` 封装打开、关闭相机；`StartRecordingAsync` / `StopRecordingAsync` 封装开始、停止录像。录像使用 `Record.SegmentSeconds` 分段，完成回调记录文件信息；关闭相机前先停止录像，停止失败保留状态以便重试。
-- 同级的 `IDetectManager` / `DetectManager` 注册为单例，通过控制中心的 `Detect` 访问，封装模型初始化、轨道检测和清除结果。检测前需初始化模型；传入 `camera.NativeCameraId`，不能使用配置中的业务 `Id`。调用方需保证检测期间相机不被关闭，结果数组仅前 `count` 项有效。
+- 同级的 `IDetectManager` / `DetectManager` 注册为单例，通过控制中心的 `Detect` 访问，封装模型初始化、方向定位检测和清除结果。检测前需初始化模型；传入 `camera.NativeCameraId`，不能使用配置中的业务 `Id`。调用方需保证检测期间相机不被关闭，结果为 `OrientationPosInfo.centerX`，坐标基准及无目标时的取值待设备联调确认。
 - `Enabled` 控制是否创建相机实例。录像和检测目前由业务显式调用，不会随启动自动执行；`DetectionEnabled` 和 `Record.Enabled` 仍预留给后续自动调度流程。
 - `PLCManager` 注册为单例，控制中心启动时自动运行 TCP 连接、接收和断线重连循环；连接失败不会阻止相机管理流程启动。
 - 停止后台服务时控制中心依次调用各相机的关闭方法。相机 Id 重复、端口或录像数字参数无效时启动校验失败。
@@ -22,7 +22,7 @@ var camera = controlCenter.Cameras[0];
 var inspection = await inspectionService.StartAsync(null); // 注入 IInspectionService，先创建巡检记录。
 await camera.StartRecordingAsync(inspection.Id, "/data/records", cancellationToken);
 await controlCenter.Detect.InitModelAsync("/data/models/lane.engine", cancellationToken);
-var result = await controlCenter.Detect.LaneDetectAsync(camera.NativeCameraId,
+var result = await controlCenter.Detect.OrientationPosDetectAsync(camera.NativeCameraId,
     new RoiInfo { nX = 0, nY = 0, nWidth = 640, nHeight = 480 }, cancellationToken);
 await controlCenter.Detect.ClearDetectResultAsync(camera.NativeCameraId, cancellationToken);
 await camera.StopRecordingAsync(cancellationToken);
