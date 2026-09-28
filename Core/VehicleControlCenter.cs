@@ -10,6 +10,7 @@ public sealed class VehicleControlCenter
     private int _running;
     private readonly VehicleOptions _options;
     private readonly DetectionScheduler _detectionScheduler;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public IReadOnlyList<ICameraManager> Cameras { get; }
     public PLCManager PLC { get; }
@@ -21,11 +22,13 @@ public sealed class VehicleControlCenter
         PLCManager plcManager,
         IDetectManager detectManager,
         DetectionScheduler detectionScheduler,
+        IServiceScopeFactory scopeFactory,
         ILogger<VehicleControlCenter> logger)
     {
         _logger = logger;
         _options = options.Value;
         _detectionScheduler = detectionScheduler;
+        _scopeFactory = scopeFactory;
         PLC = plcManager;
         Detect = detectManager;
         Cameras = options.Value.Cameras
@@ -43,9 +46,10 @@ public sealed class VehicleControlCenter
         }
 
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        // 分别启动，互不等待。原生初始化和开相机可能同步耗时，因此放到后台线程。
+        // PLC 和模型初始化独立启动；相机流程等待首次模式 3，不阻塞通信和模型准备。
+        // 原生初始化和开相机可能同步耗时，因此放到后台线程。
         var plcTask = Task.Run(() => RunPlcAsync(lifetime.Token));
-        var cameraTask = Task.Run(() => OpenCamerasAsync(lifetime.Token));
+        var cameraTask = Task.Run(() => RunAutomaticInspectionAsync(lifetime.Token));
         var detectionTask = Task.Run(() => RunDetectionAsync(lifetime.Token));
         try
         {
@@ -93,21 +97,60 @@ public sealed class VehicleControlCenter
         }
     }
 
-    private async Task OpenCamerasAsync(CancellationToken token)
+    private async Task RunAutomaticInspectionAsync(CancellationToken token)
     {
-        // 开相机不需要等待模型；某台打开失败也继续打开其他相机。
-        foreach (var camera in Cameras)
+        try
         {
-            try
+            _logger.LogInformation("等待 PLC 自动模式 3，收到后开相机并启动巡检录像");
+            await PLC.WaitForAutomaticModeAsync(token);
+            var openedCameras = new List<ICameraManager>();
+            // 开相机不依赖数据库和模型初始化；单台失败不影响其他相机。
+            foreach (var camera in Cameras)
             {
-                token.ThrowIfCancellationRequested();
-                await camera.OpenAsync(token);
+                try
+                {
+                    token.ThrowIfCancellationRequested();
+                    await camera.OpenAsync(token);
+                    openedCameras.Add(camera);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                catch (Exception exception)
+                {
+                    _logger.LogError(exception, "打开相机 {CameraId} 失败", camera.Id);
+                }
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
-            catch (Exception exception)
+
+            token.ThrowIfCancellationRequested();
+            using var scope = _scopeFactory.CreateScope();
+            var inspectionService = scope.ServiceProvider.GetRequiredService<IInspectionService>();
+            var inspection = await inspectionService.StartAsync(null);
+            _logger.LogInformation("自动模式巡检已创建，巡检 ID：{InspectionId}", inspection.Id);
+            foreach (var camera in openedCameras)
             {
-                _logger.LogError(exception, "打开相机 {CameraId} 失败", camera.Id);
+                if (!_options.Cameras.Single(item => item.Id == camera.Id).Record.Enabled) continue;
+                try
+                {
+                    token.ThrowIfCancellationRequested();
+                    // 每次巡检、每台相机单独建目录；业务 Id 转义并加前缀，避免路径分隔符影响目录。
+                    ArgumentException.ThrowIfNullOrWhiteSpace(_options.RecordSavePath);
+                    var root = Path.GetFullPath(_options.RecordSavePath, AppContext.BaseDirectory);
+                    var path = Path.Combine(root, inspection.Id.ToString(), "camera-" + Uri.EscapeDataString(camera.Id));
+                    Directory.CreateDirectory(path);
+                    await camera.StartRecordingAsync(inspection.Id, path, token);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                catch (Exception exception)
+                {
+                    _logger.LogError(exception, "相机 {CameraId} 启动录像失败，巡检 ID：{InspectionId}", camera.Id, inspection.Id);
+                }
             }
+            // 巡检结束暂未接入；不把停车、切换模式或断线当作结束，也不重复创建巡检。
+            // 宿主退出时由 RunAsync 的 finally 等待识别结束，再停止录像并关闭相机。
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "自动巡检启动失败；已打开相机的识别和 PLC 通信继续运行");
         }
     }
 

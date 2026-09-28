@@ -9,11 +9,11 @@
 - `CameraManagerFactory` 为每个启用的相机创建独立对象，控制中心持有这些对象；不是多个相机共用一个单例相机对象。
 - `CameraManager.OpenAsync` / `CloseAsync` 封装打开、关闭相机；`StartRecordingAsync` / `StopRecordingAsync` 封装开始、停止录像。录像使用 `Record.SegmentSeconds` 分段，完成回调记录文件信息；关闭相机前先停止录像，停止失败保留状态以便重试。
 - 同级的 `IDetectManager` / `DetectManager` 注册为单例，通过控制中心的 `Detect` 访问，封装模型初始化、方向定位检测和清除结果。检测前需初始化模型；传入 `camera.NativeCameraId`，不能使用配置中的业务 `Id`。调用方需保证检测期间相机不被关闭，结果为 `OrientationPosInfo.centerX`，坐标基准及无目标时的取值待设备联调确认。
-- `Enabled` 控制是否创建相机实例。录像和检测目前由业务显式调用，不会随启动自动执行；`DetectionEnabled` 和 `Record.Enabled` 仍预留给后续自动调度流程。
-- `PLCManager` 注册为单例，控制中心启动时自动运行 TCP 连接、接收和断线重连循环；连接失败不会阻止相机管理流程启动。
+- `Enabled` 控制是否创建相机实例。首次收到 PLC 模式 3 后打开相机，按 `Record.Enabled` 启动录像，按 `DetectionEnabled` 接入识别；模型在程序启动时独立初始化。
+- `PLCManager` 注册为单例，控制中心启动时自动运行 TCP 连接、接收和断线重连循环；相机流程等待首次自动模式 3，PLC 连接失败不影响模型初始化。
 - 停止后台服务时控制中心依次调用各相机的关闭方法。相机 Id 重复、端口或录像数字参数无效时启动校验失败。
 
-配置里的相机 IP 和账号仍为示例，实际运行前需要补全。CameraIP 支持完整 RTSP 地址（包含码流路径及认证信息），或使用纯 IP、Port、UserName、Pwd 生成 rtsp://账号:密码@IP:端口/，账号密码进行 URL 转义。地址和别名不能含空字符，且最多 199 个 UTF-8 字节。打开失败会退出控制中心并清理已打开相机；关闭失败记录错误并继续清理其他相机，目前不自动重试。旧的原生 SDK 测试 Controller 已移除，相机启停由控制中心调度；底层声明集中在 `NativeInterop/NativeMethods.cs`，业务直接调用 `NativeMethods.RobotX_*`；结构体、回调及调用示例见 `NativeInterop/README.md`。
+配置里的相机 IP 和账号仍为示例，实际运行前需要补全。CameraIP 支持完整 RTSP 地址（包含码流路径及认证信息），或使用纯 IP、Port、UserName、Pwd 生成 rtsp://账号:密码@IP:端口/，账号密码进行 URL 转义。地址和别名不能含空字符，且最多 199 个 UTF-8 字节。单台相机打开失败不会停止其他相机；关闭失败记录错误并继续清理其他相机，目前不自动重试。旧的原生 SDK 测试 Controller 已移除，相机启停由控制中心调度；底层声明集中在 `NativeInterop/NativeMethods.cs`，业务直接调用 `NativeMethods.RobotX_*`；结构体、回调及调用示例见 `NativeInterop/README.md`。
 
 调用示例（相机已打开，路径为运行 SDK 的设备上的路径）：
 
@@ -72,7 +72,7 @@ lock (_sync)
 
 业务层通过注入的单例 `PLCManager` 调用 `await plcManager.SendDataAsync(commandBytes, cancellationToken)` 发送原始字节，不使用 `new PLCManager()` 或手动 Dispose。并发发送会串行写入，未连接时抛异常，发送失败不自动重发，避免重复执行设备指令。写入完成仅表示数据交给 TCP，不表示 PLC 已执行成功。
 
-启动时不会自动发送 `HelloWorld`。当前只实现 TCP 传输，尚未实现 PLC 业务报文、应答匹配或控制指令；TCP 一次读取可能是半包或多个报文，不能直接视为一条完整消息。后续按协议增加缓存拆包和业务处理。
+接收固定 8 字节，支持半包和粘包，前两字节大端模式值 00 03 首次触发开相机和巡检录像。仅车头相机识别，每次成功立即发送 3 字节：大端 centerX 加 01（就绪，巡检结束位为 0）。已移除 25 字节交替发送测试。发送无额外等待，TCP 禁用 Nagle；网络写入超时为 1 秒，失败不重发旧结果。详见 Core/Detection.md。
 
 ## 数据库表结构更新（SqlSugar CodeFirst）
 
@@ -99,7 +99,7 @@ database.CodeFirst.InitTables<InspectionRecord, InspectionVideoFile>();
 
 ## 巡检记录与 RustFS 视频上传
 
-巡检开始、结束的业务触发时机暂未接入 PLC；录像完成回调已连接后台存库通知入口。以下入口可以调用：
+PLC 首次模式 3 已接入巡检创建和录像启动，重复报文不重复启动；巡检结束暂未接入；录像完成回调已连接后台存库通知入口。以下入口可以调用：
 
 | 时机 | 调用入口 | 行为 |
 | --- | --- | --- |

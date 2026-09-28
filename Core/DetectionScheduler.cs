@@ -1,12 +1,13 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Threading.Channels;
 using TrackedVehicle.Model;
 using TrackedVehicle.NativeInterop;
 
 namespace TrackedVehicle.Core;
 
 /// <summary>按相机编号保存最新通知，后台逐台限频识别。</summary>
-public sealed class DetectionScheduler(IDetectManager detector, ILogger<DetectionScheduler> logger)
+public sealed class DetectionScheduler(IDetectManager detector, PLCManager plc, ILogger<DetectionScheduler> logger)
 {
     // key 为 C++ SDK 返回的 camId，value 为该相机的识别配置和运行状态。
     private readonly ConcurrentDictionary<int, CameraState> cameraDitc = new();
@@ -17,6 +18,14 @@ public sealed class DetectionScheduler(IDetectManager detector, ILogger<Detectio
     // 相机帧回调只更新最新通知，不获取此信号量，因此不会等待识别完成。
     private readonly SemaphoreSlim _execution = new(1, 1);
     private int _running;
+    // 仅保留一个唤醒信号，实际帧通知仍存于各相机的 Latest，不排队保存历史帧。
+    // 禁止同步续接，确保帧回调不会直接执行后台识别；新通知到达即可唤醒，无需定时轮询。
+    private readonly Channel<byte> _wakeUp = Channel.CreateBounded<byte>(new BoundedChannelOptions(1)
+    {
+        SingleReader = true,
+        FullMode = BoundedChannelFullMode.DropWrite,
+        AllowSynchronousContinuations = false
+    });
 
     private sealed class FrameNotice
     {
@@ -81,6 +90,7 @@ public sealed class DetectionScheduler(IDetectManager detector, ILogger<Detectio
                 // 后台识别线程会同时读取并清空 Latest，因此使用 Interlocked 协调访问。
                 // Exchange 会返回旧通知，这里不需要它：只保留最新一条，不排队。
                 Interlocked.Exchange(ref camera.Latest, new FrameNotice(frameIndex));
+                _wakeUp.Writer.TryWrite(0);
             }
         }
     }
@@ -99,10 +109,9 @@ public sealed class DetectionScheduler(IDetectManager detector, ILogger<Detectio
             throw new InvalidOperationException("识别调度器已在运行。");
         try
         {
-            // 10ms 是检查周期，不是识别间隔；识别耗时期间不会另外启动一轮。
-            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(10));
-            while (await timer.WaitForNextTickAsync(token))
+            while (await _wakeUp.Reader.WaitToReadAsync(token))
             {
+                _wakeUp.Reader.TryRead(out _);
                 foreach (var (camId, camera) in cameraDitc.ToArray())
                 {
                     await _execution.WaitAsync(token);
@@ -118,8 +127,20 @@ public sealed class DetectionScheduler(IDetectManager detector, ILogger<Detectio
                         //获取的是一个高精度计时器当前的时间戳（计数值）
                         var started = Stopwatch.GetTimestamp();
                         var result = await detector.OrientationPosDetectAsync(camId, camera.Roi, token);
-                        logger.LogInformation("相机 {CameraId} 识别完成，触发帧序号 {TriggerFrameIndex}，centerX {CenterX}，耗时 {ElapsedMs:F1}ms",
-                            camera.Id, frame.Index, result.centerX, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                        var detectionElapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                        // SDK 成功后先发结果再写日志，不等待下一帧或定时发送，也不积压历史中心点。
+                        try
+                        {
+                            await plc.SendDetectionResultAsync(result.centerX, token);
+                            logger.LogInformation("相机 {CameraId} 识别完成，触发帧序号 {TriggerFrameIndex}，centerX {CenterX} 已写入 PLC TCP，识别耗时 {DetectionMs:F1}ms，识别及发送总耗时 {TotalMs:F1}ms",
+                                camera.Id, frame.Index, result.centerX, detectionElapsedMs, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                        }
+                        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                        catch (Exception exception)
+                        {
+                            logger.LogError(exception, "相机 {CameraId} 识别成功，但中心点 {CenterX} 发送 PLC 失败；丢弃本次结果，等待下一次识别",
+                                camera.Id, result.centerX);
+                        }
                     }
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                     catch (Exception exception)

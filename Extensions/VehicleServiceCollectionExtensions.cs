@@ -33,6 +33,9 @@ public static class VehicleServiceCollectionExtensions
                 && camera.Detection.ROI.Y >= 0 && camera.Detection.ROI.Width > 0
                 && camera.Detection.ROI.Height > 0))),
                 "启用识别时必须配置模型路径、大于等于 1 的识别帧间隔和有效 ROI（坐标非负、宽高大于零）。")
+            .Validate(options => options.Cameras is not null
+                && options.Cameras.Count(camera => camera is not null && camera.Enabled && camera.DetectionEnabled) <= 1,
+                "当前 PLC 结果报文不含相机编号，只能启用一台相机识别，请保留车头相机。")
             .ValidateOnStart();
 
         services.AddSingleton<CameraManagerFactory>();

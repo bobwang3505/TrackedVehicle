@@ -1,16 +1,22 @@
+using System.Buffers.Binary;
 using System.Net.Sockets;
 using Microsoft.Extensions.Options;
 using TrackedVehicle.Model;
 
 namespace TrackedVehicle.Core;
 
-/// <summary>单例 PLC TCP 客户端，由控制中心负责启动和取消；暂不解析业务协议。</summary>
+/// <summary>单例 PLC TCP 客户端，接收 8 字节状态报文，发送 3 字节识别结果；整数均高字节在前。</summary>
 public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCManager> logger)
 {
     private readonly object _connectionLock = new();
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private NetworkStream? _stream;
     private int _running;
+    // 首次自动模式只触发一次启动；异步续接避免在 TCP 接收线程中执行开相机、存库等操作。
+    // 巡检结束尚未接入，因此重连、重复报文及再次进入模式 3 均不新建巡检。
+    private readonly TaskCompletionSource _automaticModeReceived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public Task WaitForAutomaticModeAsync(CancellationToken token) => _automaticModeReceived.Task.WaitAsync(token);
 
     /// <summary>当前是否持有连接；远端意外断网可能要等下一次读写失败才被发现。</summary>
     public bool IsConnected
@@ -38,7 +44,8 @@ public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCMana
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                using (var client = new TcpClient())
+                // 识别结果只有 3 字节，禁用 Nagle 合并等待，让每次结果尽快写入网络。
+                using (var client = new TcpClient { NoDelay = true })
                 {
                     try
                     {
@@ -49,10 +56,7 @@ public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCMana
                         using var stream = client.GetStream();
                         lock (_connectionLock) { _stream = stream; }
                         logger.LogInformation("PLC TCP 连接已建立：{IP}:{Port}", settings.IP, settings.Port);
-                        if (settings.SendTestEnabled)
-                            await RunSendTestAsync(stream, stoppingToken);
-                        else
-                            await ReceiveDataAsync(stream, stoppingToken);
+                        await ReceiveDataAsync(stream, stoppingToken);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                     {
@@ -122,56 +126,44 @@ public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCMana
         }
     }
 
-    /// <summary>本次连接同时接收和测试发送，任一方向结束后停止另一方向，再交给外层重连。</summary>
-    private async Task RunSendTestAsync(NetworkStream stream, CancellationToken stoppingToken)
+    /// <summary>成功识别后发送中心点原值，就绪位为 1，巡检结束位暂为 0；不缓存或重发过期结果。</summary>
+    public async Task SendDetectionResultAsync(int centerX, CancellationToken token)
     {
-        using var connection = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var receiveTask = ReceiveDataAsync(stream, connection.Token);
-        var sendTask = SendTestDataAsync(connection.Token);
-        try
-        {
-            await Task.WhenAny(receiveTask, sendTask);
-        }
-        finally
-        {
-            // 先取消本次连接的读写和延时，再等待两个任务退出，避免旧发送循环进入新连接。
-            connection.Cancel();
-            try { await Task.WhenAll(receiveTask, sendTask); }
-            catch (OperationCanceledException) when (connection.IsCancellationRequested) { }
-        }
-    }
-
-    private async Task SendTestDataAsync(CancellationToken cancellationToken)
-    {
-        // 直接发送 25 个原始字节，不发送十六进制字符串；每次重连从 FF 开始。
-        var data = new byte[25];
-        data[0] = 0xFF;
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await SendDataAsync(data, cancellationToken);
-            logger.LogInformation("PLC 测试发送 {ByteCount} 字节：{Hex}", data.Length, BitConverter.ToString(data));
-            data[0] = data[0] == 0xFF ? (byte)0x00 : (byte)0xFF;
-            // 每次写入完成后等待 1 秒；停止或断线时取消等待，不积压测试报文。
-            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-        }
+        // 协议只有两个字节，超出可表示范围就报错，不能截断、缩放或把负数包装成位置。
+        if (centerX < 0 || centerX > ushort.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(centerX), centerX, "中心点无法用两个无符号字节表示。");
+        var data = new byte[3];
+        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(0, 2), (ushort)centerX);
+        data[2] = 0x01;
+        // 正常发送不加延时；网络写入最多等待 1 秒，超时由发送接口断开连接，避免无限阻塞识别。
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(1));
+        await SendDataAsync(data, timeout.Token);
     }
 
     private async Task ReceiveDataAsync(NetworkStream stream, CancellationToken cancellationToken)
     {
-        var buffer = new byte[1024];
+        var buffer = new byte[8];
+        int received = 0;
         while (true)
         {
-            var bytesRead = await stream.ReadAsync(buffer, cancellationToken);
+            // TCP 不保留报文边界：只读取当前报文缺少的字节，凑齐 8 字节才解析。
+            // 缓冲区属于本次连接，断线后丢弃残包，不能与重连后的数据拼接。
+            var bytesRead = await stream.ReadAsync(buffer.AsMemory(received), cancellationToken);
             if (bytesRead == 0)
             {
-                logger.LogWarning("PLC 已关闭 TCP 连接");
+                logger.LogWarning("PLC 已关闭 TCP 连接，丢弃未完成报文 {ByteCount} 字节", received);
                 return;
             }
 
-            logger.LogInformation("收到 PLC TCP 数据片段，共 {ByteCount} 字节：{Hex}",
-                bytesRead, BitConverter.ToString(buffer, 0, bytesRead));
-            // TODO：按真实 PLC 协议缓存并拆包。一次 Read 不一定是一条完整报文，不能直接逐次解码文本。
+            received += bytesRead;
+            if (received < buffer.Length) continue;
+            received = 0;
+            var mode = BinaryPrimitives.ReadUInt16BigEndian(buffer.AsSpan(0, 2));
+            var speed = BinaryPrimitives.ReadUInt16BigEndian(buffer.AsSpan(6, 2));
+            logger.LogInformation("收到 PLC 8 字节：{Hex}，模式 {Mode}，车速原值 {Speed}",
+                BitConverter.ToString(buffer), mode, speed);
+            if (mode == 3) _automaticModeReceived.TrySetResult();
         }
     }
 }
