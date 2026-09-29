@@ -125,25 +125,15 @@ public sealed class VehicleControlCenter
             var inspectionService = scope.ServiceProvider.GetRequiredService<IInspectionService>();
             var inspection = await inspectionService.StartAsync(null);
             _logger.LogInformation("自动模式巡检已创建，巡检 ID：{InspectionId}", inspection.Id);
+            var recordingTasks = new List<Task>();
             foreach (var camera in openedCameras)
             {
                 if (!_options.Cameras.Single(item => item.Id == camera.Id).Record.Enabled) continue;
-                try
-                {
-                    token.ThrowIfCancellationRequested();
-                    // 每次巡检、每台相机单独建目录；业务 Id 转义并加前缀，避免路径分隔符影响目录。
-                    ArgumentException.ThrowIfNullOrWhiteSpace(_options.RecordSavePath);
-                    var root = Path.GetFullPath(_options.RecordSavePath, AppContext.BaseDirectory);
-                    var path = Path.Combine(root, inspection.Id.ToString(), "camera-" + Uri.EscapeDataString(camera.Id));
-                    Directory.CreateDirectory(path);
-                    await camera.StartRecordingAsync(inspection.Id, path, token);
-                }
-                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-                catch (Exception exception)
-                {
-                    _logger.LogError(exception, "相机 {CameraId} 启动录像失败，巡检 ID：{InspectionId}", camera.Id, inspection.Id);
-                }
+                // 每台相机独立等待连接回调，避免一台连接慢让其他相机也迟迟不能录像。
+                recordingTasks.Add(StartCameraRecordingAsync(camera, inspection.Id, token));
             }
+            // 持有并等待所有启动任务，宿主取消时先结束等待，再由关闭流程释放相机。
+            await Task.WhenAll(recordingTasks);
             // 巡检结束暂未接入；不把停车、切换模式或断线当作结束，也不重复创建巡检。
             // 宿主退出时由 RunAsync 的 finally 等待识别结束，再停止录像并关闭相机。
         }
@@ -151,6 +141,27 @@ public sealed class VehicleControlCenter
         catch (Exception exception)
         {
             _logger.LogError(exception, "自动巡检启动失败；已打开相机的识别和 PLC 通信继续运行");
+        }
+    }
+
+    private async Task StartCameraRecordingAsync(ICameraManager camera, long inspectionId, CancellationToken token)
+    {
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            // 每次巡检、每台相机单独建目录；业务 Id 转义并加前缀，避免路径分隔符影响目录。
+            ArgumentException.ThrowIfNullOrWhiteSpace(_options.RecordSavePath);
+            // 相对路径基于程序部署目录，自动创建根目录和子目录，不依赖启动终端的当前目录。
+            var root = Path.GetFullPath(_options.RecordSavePath, AppContext.BaseDirectory);
+            var path = Path.Combine(root, inspectionId.ToString(), "camera-" + Uri.EscapeDataString(camera.Id));
+            Directory.CreateDirectory(path);
+            _logger.LogInformation("相机 {CameraId} 录像目录已准备：{RecordPath}", camera.Id, path);
+            await camera.StartRecordingAsync(inspectionId, path, token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "相机 {CameraId} 启动录像失败，巡检 ID：{InspectionId}", camera.Id, inspectionId);
         }
     }
 

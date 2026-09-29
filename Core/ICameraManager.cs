@@ -9,7 +9,7 @@ public interface ICameraManager
     /// <summary>已打开相机的原生 SDK 编号；未打开时抛异常。检测调用期间应保持相机打开。</summary>
     int NativeCameraId { get; }
 
-    /// <summary>绑定已存库的巡检 ID 并开始分段录像；同一巡检重复调用返回现有编号，不允许录制中切换巡检。</summary>
+    /// <summary>等待连接成功回调后绑定已存库的巡检 ID 并开始分段录像；等待最多 30 秒，可取消。同一巡检重复调用返回现有编号，不允许录制中切换巡检。</summary>
     Task<int> StartRecordingAsync(long inspectionId, string path, CancellationToken cancellationToken);
 
     /// <summary>停止当前录像；未录像时不调用 SDK。</summary>

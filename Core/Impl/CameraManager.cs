@@ -24,6 +24,9 @@ public sealed class CameraManager : ICameraManager
     private int? _camId;
     private int? _recordId;
     private long? _recordInspectionId;
+    // 每次打开建立一个通知；回调只完成通知，不在原生回调线程启动录像。
+    private TaskCompletionSource<int>? _connectionReady;
+    private int _connectionStatus;
 
     public CameraManager(CameraOptions options, ILogger<CameraManager> logger, DetectionScheduler detectionScheduler,
         RecordingFileRegistrationService recordingFiles)
@@ -48,8 +51,23 @@ public sealed class CameraManager : ICameraManager
         }
     }
 
-    public Task<int> StartRecordingAsync(long inspectionId, string path, CancellationToken cancellationToken)
+    public async Task<int> StartRecordingAsync(long inspectionId, string path, CancellationToken cancellationToken)
     {
+        TaskCompletionSource<int> connectionReady;
+        int expectedCamId;
+        lock (_sync)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            expectedCamId = NativeCameraId;
+            connectionReady = _connectionReady ?? throw new InvalidOperationException($"相机 {Id} 尚未发起连接。");
+        }
+        // 等待时不能持有生命周期锁，否则关闭流程无法继续；30 秒无连接回调则报超时。
+        // 取消仅结束本次等待，不取消共享通知，也不能中断已经进入的原生录像调用。
+        _logger.LogInformation("相机 {CameraId} 准备录像，等待连接成功回调", Id);
+        var status = await connectionReady.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+        if (status != 1)
+            throw new InvalidOperationException($"相机 {Id} 未连接成功或已关闭，状态码：{status}，不启动录像。");
+
         // 检查录像状态、调用 SDK、保存录像 ID 一起加锁，避免重复录像或与关闭操作冲突。
         // NativeCameraId 内部也会加锁；同一线程可以再次进入同一把锁，不会把自己锁住。
         lock (_sync)
@@ -58,12 +76,16 @@ public sealed class CameraManager : ICameraManager
             if (inspectionId <= 0)
                 throw new ArgumentOutOfRangeException(nameof(inspectionId), "必须传入已创建的巡检记录 ID。");
             var camId = NativeCameraId;
+            // 等待期间可能关闭或重新打开；旧通知不能用于新连接，且首次成功后也可能再次断开。
+            if (camId != expectedCamId || !ReferenceEquals(connectionReady, _connectionReady)
+                || Volatile.Read(ref _connectionStatus) != 1)
+                throw new InvalidOperationException($"相机 {Id} 连接已变化，不能启动本次录像。");
             if (_recordId.HasValue)
             {
                 int existingId = _recordId.Value;
                 if (_recordInspectionId != inspectionId)
                     throw new InvalidOperationException($"相机 {Id} 正在为巡检 {_recordInspectionId} 录像，请先停止再切换巡检。");
-                return Task.FromResult(existingId);
+                return existingId;
             }
 
             ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -90,7 +112,7 @@ public sealed class CameraManager : ICameraManager
             _recordId = recordId;
             _recordInspectionId = inspectionId;
             _logger.LogInformation("相机 {CameraId} 开始录像，录像 ID：{RecordId}", Id, _recordId);
-            return Task.FromResult(_recordId.Value);
+            return _recordId.Value;
         }
     }
 
@@ -134,9 +156,16 @@ public sealed class CameraManager : ICameraManager
             ValidateNativeString(cfg.chDev, "相机地址");
             ValidateNativeString(cfg.chAlias, "相机别名");
             var camId = -1;
+            // 先发布通知再调用 SDK，兼容 OpenCam 返回前就发生状态回调的情况。
+            // 异步续接确保完成通知时不会在原生回调线程内直接执行后续录像代码。
+            Volatile.Write(ref _connectionStatus, 0);
+            Volatile.Write(ref _connectionReady, new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously));
             var result = NativeMethods.RobotX_OpenCam(ref cfg, _frameCallback, _statusCallback, ref camId);
             if (result != 0)
+            {
+                Interlocked.Exchange(ref _connectionReady, null)?.TrySetResult(-1);
                 throw new InvalidOperationException($"打开相机 {Id} 失败，SDK 返回码：{result}。");
+            }
 
             _camId = camId;
             if (_options.DetectionEnabled)
@@ -167,6 +196,8 @@ public sealed class CameraManager : ICameraManager
                 throw new InvalidOperationException($"关闭相机 {Id} 失败，SDK 返回码：{result}。");
 
             _camId = null;
+            Volatile.Write(ref _connectionStatus, 0);
+            Interlocked.Exchange(ref _connectionReady, null)?.TrySetResult(0);
             _logger.LogInformation("相机 {CameraId} 已关闭，原生 ID：{NativeCameraId}", Id, camId);
         }
         return Task.CompletedTask;
@@ -255,10 +286,17 @@ public sealed class CameraManager : ICameraManager
         // 不获取生命周期锁，避免 SDK 等待回调造成死锁。
         try
         {
+            // 头文件约定 1 为成功、-1 为失败；其他状态只记录，不猜测含义。
+            if (status == 1 || status == -1)
+            {
+                Volatile.Write(ref _connectionStatus, status);
+            }
             if (status == 1)
                 _logger.LogInformation("相机 {CameraId} 连接成功，原生 ID：{NativeCameraId}", Id, id);
             else
                 _logger.LogWarning("相机 {CameraId} 状态变化，原生 ID：{NativeCameraId}，状态码：{Status}", Id, id, status);
+            if (status == 1 || status == -1)
+                Volatile.Read(ref _connectionReady)?.TrySetResult(status);
         }
         catch (Exception)
         {
