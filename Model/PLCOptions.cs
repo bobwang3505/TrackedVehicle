@@ -11,7 +11,7 @@ public sealed class PLCOptions
     public PLCSimulationOptions Simulation { get; set; } = new();
 }
 
-/// <summary>仅模拟 PLC 收发，仍使用真实相机和模型；修改后重启生效。</summary>
+/// <summary>额外注入模拟接收报文，真实 PLC 连接和收发不变；修改后重启生效。</summary>
 public sealed class PLCSimulationOptions
 {
     public bool Enabled { get; set; }

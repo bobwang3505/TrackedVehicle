@@ -12,9 +12,6 @@ public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCMana
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private NetworkStream? _stream;
     private int _running;
-    private int _simulationRunning;
-
-    public bool IsSimulation => options.Value.PLC.Simulation.Enabled;
     // 首次自动模式只触发一次启动；异步续接避免在 TCP 接收线程中执行开相机、存库等操作。
     // 巡检结束尚未接入，因此重连、重复报文及再次进入模式 3 均不新建巡检。
     private readonly TaskCompletionSource _automaticModeReceived = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -35,6 +32,8 @@ public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCMana
             throw new InvalidOperationException("PLC 通信循环已启动，不能重复启动。");
         }
 
+        using var simulationLifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        Task simulationTask = Task.CompletedTask;
         try
         {
             var settings = options.Value.PLC;
@@ -48,17 +47,10 @@ public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCMana
             if (settings.Simulation.Enabled)
             {
                 var data = settings.Simulation.ParseReceiveData();
-                logger.LogWarning("PLC 模拟模式已启用，不连接真实 PLC；每 {IntervalMs} 毫秒模拟接收一次，发送仅记录日志",
+                logger.LogWarning("PLC 模拟接收已启用：每 {IntervalMs} 毫秒注入一次报文；真实 TCP 连接和收发保持运行，中心点仍发送给真实 PLC",
                     settings.Simulation.IntervalMilliseconds);
-                // 先标记模拟收发可用，再提交首条通知，避免相机启动后发送结果时尚未就绪。
-                Volatile.Write(ref _simulationRunning, 1);
-                while (true)
-                {
-                    stoppingToken.ThrowIfCancellationRequested();
-                    ProcessReceivedData(data);
-                    // 第一条立即提交；后续按毫秒间隔重复，宿主停止时取消等待，不另建后台任务。
-                    await Task.Delay(settings.Simulation.IntervalMilliseconds, stoppingToken);
-                }
+                // 模拟接收独立于连接和重连，首次立即注入；由本方法持有任务，退出时取消并等待结束。
+                simulationTask = SimulateReceiveAsync(data, settings.Simulation.IntervalMilliseconds, simulationLifetime.Token);
             }
 
             while (!stoppingToken.IsCancellationRequested)
@@ -105,7 +97,8 @@ public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCMana
         }
         finally
         {
-            Volatile.Write(ref _simulationRunning, 0);
+            simulationLifetime.Cancel();
+            await simulationTask;
             Interlocked.Exchange(ref _running, 0);
             logger.LogInformation("PLC 通信已停止，连接已关闭");
         }
@@ -117,13 +110,6 @@ public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCMana
         ArgumentNullException.ThrowIfNull(command);
         if (command.Length == 0) { throw new ArgumentException("发送数据不能为空。", nameof(command)); }
         cancellationToken.ThrowIfCancellationRequested();
-        if (IsSimulation)
-        {
-            if (Volatile.Read(ref _simulationRunning) == 0)
-                throw new InvalidOperationException("PLC 模拟通信尚未启动或已停止。");
-            logger.LogInformation("PLC 模拟发送 {ByteCount} 字节：{Hex}", command.Length, BitConverter.ToString(command));
-            return;
-        }
 
         // 绑定调用时的连接，排队期间断线则报错，不把旧命令发送到重连后的新连接。
         NetworkStream stream;
@@ -187,17 +173,32 @@ public sealed class PLCManager(IOptions<VehicleOptions> options, ILogger<PLCMana
             received += bytesRead;
             if (received < buffer.Length) continue;
             received = 0;
-            ProcessReceivedData(buffer);
+            ProcessReceivedData(buffer, false);
         }
     }
 
-    private void ProcessReceivedData(byte[] data)
+    private async Task SimulateReceiveAsync(byte[] data, int intervalMilliseconds, CancellationToken token)
+    {
+        try
+        {
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                ProcessReceivedData(data, true);
+                // 单位为毫秒；只注入接收数据，不占用真实收包循环，停止时取消等待。
+                await Task.Delay(intervalMilliseconds, token);
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+    }
+
+    private void ProcessReceivedData(byte[] data, bool simulated)
     {
         // 真实接收已凑齐 8 字节，模拟接收也先校验长度，两种来源共用业务解析和启动条件。
         var mode = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(0, 2));
         var speed = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(6, 2));
         logger.LogInformation("PLC {ReceiveType} 8 字节：{Hex}，模式 {Mode}，车速原值 {Speed}",
-            IsSimulation ? "模拟接收" : "接收", BitConverter.ToString(data), mode, speed);
+            simulated ? "模拟接收" : "真实接收", BitConverter.ToString(data), mode, speed);
         if (mode == 3) _automaticModeReceived.TrySetResult();
     }
 }
