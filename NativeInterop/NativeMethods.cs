@@ -84,7 +84,7 @@ namespace TrackedVehicle.NativeInterop
         public static extern int RobotX_StopRealTimeRecord(int recId);
 
         /// <summary>调用原生 SDK 初始化模型，方向定位检测前需先成功调用。</summary>
-        /// <param name="modelPath">运行 SDK 的设备上的模型路径，以 UTF-8 字符串传给原生接口。</param>
+        /// <param name="modelPath">运行 SDK 的设备上的模型目录，不带模型文件名，以 UTF-8 字符串传给原生接口。</param>
         /// <returns>0 成功，负数失败。</returns>
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int RobotX_InitModel([MarshalAs(UnmanagedType.LPUTF8Str)] string modelPath);

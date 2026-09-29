@@ -6,7 +6,7 @@ namespace TrackedVehicle.Core;
 public interface IDetectManager
 {
     /// <summary>初始化检测模型；成功后才能调用方向定位检测。</summary>
-    /// <param name="modelPath">运行 SDK 的设备上的模型路径。</param>
+    /// <param name="modelPath">运行 SDK 的设备上的模型目录，不带模型文件名。</param>
     /// <param name="cancellationToken">调用 SDK 前检查取消。</param>
     /// <returns>模型初始化完成的任务。</returns>
     Task InitModelAsync(string modelPath, CancellationToken cancellationToken);

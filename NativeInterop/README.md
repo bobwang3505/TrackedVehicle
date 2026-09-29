@@ -55,7 +55,7 @@ private static void OnMediaFinished(int id, string fileName, long startTime, lon
 
 目前 `linux-arm64/LibRobotCamX.so` 已替换为真实动态库；项目会将库复制到输出和发布目录。运行时由 .NET 按 DllImport 名称加载。
 
-`linux-arm64/robot.rknn` 也会复制到输出和发布目录的 `models` 子目录。`Vehicle.DetectionModelPath` 配置为 `models/robot.rknn`，相对路径按程序所在目录解析，也可填写开发板上的绝对路径。初始化前检查模型文件存在；是否能加载、是否与板上 RKNN 运行库兼容，仍需设备验证。相机的 `DetectionEnabled` 设为 `true` 后才会进入模型初始化和识别流程。
+`linux-arm64/robot.rknn` 也会复制到输出和发布目录的 `models` 子目录。`Vehicle.DetectionModelPath` 配置为 `models`，相对路径按程序所在目录解析，也可填写开发板上的绝对路径。初始化前检查模型目录存在，并记录传给 SDK 的完整目录；目录参数不带模型文件名；是否能加载、是否与板上 RKNN 运行库兼容，仍需设备验证。相机的 `DetectionEnabled` 设为 `true` 后才会进入模型初始化和识别流程。
 
 1. 更新 `.so` 和配套头文件，若签名变化，直接修改 `NativeInterop/NativeMethods.cs` 和业务调用。
 2. 若库名变化，修改 `NativeMethods.DllName`；不再使用 `NativeSdk` 配置节点。
