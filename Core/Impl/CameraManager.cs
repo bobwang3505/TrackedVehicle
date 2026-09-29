@@ -90,8 +90,8 @@ public sealed class CameraManager : ICameraManager
 
             ArgumentException.ThrowIfNullOrWhiteSpace(path);
             ValidateNativeString(path, "录像路径");
-            if (_options.Record.SegmentSeconds <= 0)
-                throw new InvalidOperationException("录像分段秒数必须大于 0。");
+            if (_options.Record.SegmentMinutes <= 0)
+                throw new InvalidOperationException("录像分段分钟数必须大于 0。");
 
             var mediaInfo = new MediaInfo { chPath = path };
             var recordId = -1;
@@ -102,7 +102,7 @@ public sealed class CameraManager : ICameraManager
 
             _mediaFinishCallbacks.Add(callback);
             var result = NativeMethods.RobotX_StartRealTimeRecord(camId, ref mediaInfo,
-                _options.Record.SegmentSeconds, callback, ref recordId);
+                _options.Record.SegmentMinutes, callback, ref recordId);
             if (result != 0)
                 throw new InvalidOperationException($"相机 {Id} 开始录像失败，SDK 返回码：{result}。");
 

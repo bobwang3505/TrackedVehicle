@@ -14,8 +14,8 @@ public static class VehicleServiceCollectionExtensions
             .Validate(options => options.Cameras is not null && options.Cameras.All(camera =>
                 camera is not null && !string.IsNullOrWhiteSpace(camera.Id)
                 && camera.Port is > 0 and <= 65535
-                && camera.Record is not null && camera.Record.FPS > 0 && camera.Record.SegmentSeconds > 0),
-                "相机必须配置 Id、有效端口、正数 FPS 和录像切片时长。")
+                && camera.Record is not null && camera.Record.FPS > 0 && camera.Record.SegmentMinutes > 0),
+                "相机必须配置 Id、有效端口、正数 FPS 和录像切片分钟数。")
             .Validate(options => options.Cameras is not null && options.Cameras.All(camera => camera is not null)
                 && options.Cameras.Select(camera => camera.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == options.Cameras.Count,
                 "相机 Id 不能重复。")

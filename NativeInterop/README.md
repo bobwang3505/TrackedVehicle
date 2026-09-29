@@ -20,11 +20,11 @@ public int OpenCamera(string address, string alias)
 }
 
 // 相机连接成功后，由业务按录像开关调用。
-public int StartRecording(string path, int seconds)
+public int StartRecording(string path, int minutes)
 {
     var media = new MediaInfo { chPath = path };
     return NativeMethods.RobotX_StartRealTimeRecord(
-        _camId, ref media, seconds, _finishCallback, ref _recId);
+        _camId, ref media, minutes, _finishCallback, ref _recId);
 }
 
 public int Detect(RoiInfo roi, out OrientationPosInfo result)

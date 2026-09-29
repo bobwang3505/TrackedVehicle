@@ -74,7 +74,7 @@ namespace TrackedVehicle.NativeInterop
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int RobotX_CloseCam(int camId);
 
-        /// <summary>开始录像，duration 为分段秒数，返回 0 成功、负数失败；录像编号由 recId 输出。</summary>
+        /// <summary>开始录像，duration 为分段分钟数，返回 0 成功、负数失败；录像编号由 recId 输出。</summary>
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         public static extern int RobotX_StartRealTimeRecord(int camId, ref MediaInfo mediaInfo,
             int duration, AvMediaFinishFunc finishFunc, ref int recId);

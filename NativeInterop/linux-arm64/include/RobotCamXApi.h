@@ -40,7 +40,7 @@ extern "C" ROBOT_CAM_X_API int RobotX_CloseCam(int camId);
  * 开启录像
  * camId: camera id
  * mediaInfo: 视频信息
- * duration: 录制间隔时长(sec)
+ * duration: 录制间隔时长(min)，单位为分钟
  * finishFunc: 录制完成回调
  * recId: id
  *  return 0 on success, a negative on failure

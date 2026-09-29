@@ -45,5 +45,6 @@ public sealed class CameraRecordOptions
 {
     public bool Enabled { get; set; } = true;
     public int FPS { get; set; } = 25;
-    public int SegmentSeconds { get; set; } = 60;
+    /// <summary>传给 SDK 的录像分段分钟数，默认 1 分钟，不转换为秒。</summary>
+    public int SegmentMinutes { get; set; } = 1;
 }
