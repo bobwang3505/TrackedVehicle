@@ -20,10 +20,13 @@ public static class VehicleServiceCollectionExtensions
                 && options.Cameras.Select(camera => camera.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == options.Cameras.Count,
                 "相机 Id 不能重复。")
             .Validate(options => options.PLC is not null && (!options.PLC.Enabled ||
+                (options.PLC.Simulation is not null && (options.PLC.Simulation.Enabled ||
                 (!string.IsNullOrWhiteSpace(options.PLC.IP) && options.PLC.Port is > 0 and <= 65535
                 && options.PLC.ConnectTimeoutSeconds is > 0 and <= 3600
-                && options.PLC.ReconnectIntervalSeconds is > 0 and <= 3600)),
+                && options.PLC.ReconnectIntervalSeconds is > 0 and <= 3600)))),
                 "启用 PLC 时必须配置地址、有效端口以及 1-3600 秒的连接超时和重连间隔。")
+            .Validate(options => ValidateSimulation(options.PLC),
+                "PLC 模拟配置必须包含恰好 8 字节的十六进制 ReceiveHex，IntervalMilliseconds 必须大于 0。")
             .Validate(options => options.Cameras is not null && options.Cameras.All(camera =>
                 camera is not null && (!camera.Enabled || !camera.DetectionEnabled ||
                 (!string.IsNullOrWhiteSpace(options.DetectionModelPath)
@@ -45,5 +48,22 @@ public static class VehicleServiceCollectionExtensions
         services.AddSingleton<VehicleControlCenter>();
         services.AddHostedService<TrackedVehicleBackgroundService>();
         return services;
+    }
+
+    private static bool ValidateSimulation(PLCOptions options)
+    {
+        if (options is null) return false;
+        if (!options.Enabled) return true;
+        if (options.Simulation is null) return false;
+        if (!options.Simulation.Enabled) return true;
+        try
+        {
+            options.Simulation.ParseReceiveData();
+            return true;
+        }
+        catch (Exception exception) when (exception is ArgumentException or FormatException)
+        {
+            return false;
+        }
     }
 }

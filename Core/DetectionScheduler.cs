@@ -132,8 +132,9 @@ public sealed class DetectionScheduler(IDetectManager detector, PLCManager plc, 
                         try
                         {
                             await plc.SendDetectionResultAsync(result.centerX, token);
-                            logger.LogInformation("相机 {CameraId} 识别完成，触发帧序号 {TriggerFrameIndex}，centerX {CenterX} 已写入 PLC TCP，识别耗时 {DetectionMs:F1}ms，识别及发送总耗时 {TotalMs:F1}ms",
-                                camera.Id, frame.Index, result.centerX, detectionElapsedMs, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                            logger.LogInformation("相机 {CameraId} 识别完成，触发帧序号 {TriggerFrameIndex}，centerX {CenterX} {SendStatus}，识别耗时 {DetectionMs:F1}ms，识别及发送总耗时 {TotalMs:F1}ms",
+                                camera.Id, frame.Index, result.centerX, plc.IsSimulation ? "已模拟发送" : "已写入 PLC TCP",
+                                detectionElapsedMs, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
                         }
                         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                         catch (Exception exception)
